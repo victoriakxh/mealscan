@@ -293,15 +293,66 @@ $('fab').onclick=()=>{
 /* ---------- ADD FOOD menu ---------- */
 function openAddFood(){
   const m=openModal('Add food',`
+    <div class="menu-item" id="f-search">Search by name<div class="d">Find in your library and packaged foods</div></div>
     <div class="menu-item" id="f-photo">Scan a photo<div class="d">AI identifies items; you set the weight</div></div>
     <div class="menu-item" id="f-bar">Scan a barcode<div class="d">Exact packaged-food nutrition</div></div>
     <div class="menu-item" id="f-lib">From library<div class="d">Re-log a saved meal</div></div>
     <div class="menu-item" id="f-man">Enter manually<div class="d">Type the values yourself</div></div>
   `);
+  m.querySelector('#f-search').onclick=()=>{m.remove();openSearch();};
   m.querySelector('#f-photo').onclick=()=>{m.remove();openPhoto();};
   m.querySelector('#f-bar').onclick=()=>{m.remove();openBarcode();};
   m.querySelector('#f-lib').onclick=()=>{m.remove();openLibrary();};
   m.querySelector('#f-man').onclick=()=>{m.remove();openManual();};
+}
+
+/* ---------- SEARCH BY NAME ---------- */
+function openSearch(){
+  const m=openModal('Search by name',`
+    <div class="field"><label>Brand or food name</label>
+      <input id="sf-q" placeholder="e.g. Milo, rolled oats, greek yogurt" autocomplete="off"></div>
+    <div class="btn-row"><button class="btn btn-primary btn-block" id="sf-go">Search packaged foods</button></div>
+    <div class="hint">Your library is searched as you type; the button also checks the packaged-food database.</div>
+    <div id="sf-lib"></div>
+    <div id="sf-results"></div>
+  `);
+  const q=m.querySelector('#sf-q'), libBox=m.querySelector('#sf-lib'), res=m.querySelector('#sf-results');
+  function pick(name,per,source,g){
+    const stage=el('<div></div>');
+    m.querySelector('#m-body').innerHTML='';
+    m.querySelector('#m-body').appendChild(stage);
+    weighAndLog(m,stage,name,per,source,g);
+  }
+  function renderLib(){
+    const term=q.value.trim().toLowerCase();
+    const matches=term?state.library.filter(l=>l.name.toLowerCase().includes(term)):[];
+    libBox.innerHTML=matches.length?`<div class="section-label">In your library</div>`+
+      matches.map(l=>`<div class="row tappable" data-lib="${l.id}"><div><div class="name">${esc(l.name)}</div><div class="sub">${r0(l.per_100g.calories)} kcal/100g · saved</div></div></div>`).join(''):'';
+    libBox.querySelectorAll('[data-lib]').forEach(n=>n.onclick=()=>{const l=state.library.find(x=>x.id===n.dataset.lib);pick(l.name,l.per_100g,'library',l.lastGrams);});
+  }
+  async function doSearch(){
+    const term=q.value.trim(); if(!term)return;
+    res.innerHTML=`<div class="spinner">Searching packaged foods…</div>`;
+    try{
+      const url=`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}&search_simple=1&action=process&json=1&page_size=20&fields=code,product_name,brands,nutriments`;
+      const r=await fetch(url);
+      const data=await r.json();
+      const prods=(data.products||[]).filter(p=>p.product_name && p.nutriments && p.nutriments['energy-kcal_100g']!=null);
+      if(!prods.length){res.innerHTML=`<div class="section-label">Packaged foods</div><div class="empty">Nothing found. Try a different term, scan the barcode, or enter it manually.</div>`;return;}
+      res.innerHTML=`<div class="section-label">Packaged foods</div>`+prods.map((p,i)=>{
+        const cal=r0(p.nutriments['energy-kcal_100g']);
+        return `<div class="row tappable" data-off="${i}"><div><div class="name">${esc(p.product_name)}</div><div class="sub">${p.brands?esc(p.brands)+' · ':''}${cal} kcal/100g</div></div></div>`;
+      }).join('');
+      res.querySelectorAll('[data-off]').forEach(node=>node.onclick=()=>{
+        const p=prods[+node.dataset.off], n=p.nutriments;
+        const per={calories:+(n['energy-kcal_100g']||0),protein_g:+(n['proteins_100g']||0),carbs_g:+(n['carbohydrates_100g']||0),fat_g:+(n['fat_100g']||0)};
+        pick(p.product_name,per,'packaged');
+      });
+    }catch(e){res.innerHTML=`<div class="err">Search failed — the food database may be busy. Try again in a moment, or use the barcode option.</div>`;}
+  }
+  q.oninput=renderLib;
+  q.onkeydown=(e)=>{if(e.key==='Enter'){e.preventDefault();doSearch();}};
+  m.querySelector('#sf-go').onclick=doSearch;
 }
 
 /* ---------- PHOTO ---------- */

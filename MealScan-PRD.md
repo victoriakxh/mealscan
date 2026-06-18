@@ -1,6 +1,6 @@
 # MealScan — Product Requirements Document
 
-**Version:** 1.3
+**Version:** 1.4
 **Owner:** Jupitor
 **Type:** Personal, single-user iOS web app (PWA)
 **Status:** Draft for build
@@ -9,6 +9,7 @@
 - *v1.1: added daily weight tracking, a weight trend graph, and a calorie-intake (TDEE) Plan tab.*
 - *v1.2: added exercise logging (activity, duration, intensity → calories burned via METs); the daily "remaining" budget now subtracts food and adds back exercise, recalculated live on every entry.*
 - *v1.3: added badminton to the MET table; the owner's frequent activities (walking, running, cycling, badminton) surface at the top of the activity picker.*
+- *v1.4: added search-by-name — type a brand or food name to find matches in the personal library and the packaged-food database (Open Food Facts full-text search), instead of keying a barcode number.*
 
 ---
 
@@ -99,6 +100,12 @@ Three primary tabs in a bottom navigation bar with text labels (no emojis):
 2. Look up the barcode via the Open Food Facts API for exact per-100g nutrition.
 3. User enters weight in grams; app computes and logs.
 4. If not found, fall back to manual entry with the barcode noted.
+
+### 8.2b Input mode — Search by name
+- A single search box. As the user types, the **personal library** is filtered live (instant, local) and shown under an "In your library" heading.
+- Pressing search (button or Enter) also queries the **packaged-food database** for a brand/food name via Open Food Facts full-text search (`/cgi/search.pl?search_terms=...&json=1`), returning up to ~20 products with per-100g nutrition.
+- Results combine both sources; library matches first, packaged foods below. Each result is tappable → the shared weigh-and-log step (enter grams → log), with an optional "Save to library."
+- The packaged database is free and rate-limited; the search degrades gracefully (a neutral "database may be busy" message) and the barcode and manual modes remain as fallbacks. No barcode number entry is required for this path.
 
 ### 8.3 Input mode — From library
 1. User picks a saved meal; stored per-100g values reused.
