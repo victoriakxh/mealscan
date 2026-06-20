@@ -61,6 +61,13 @@
   .row .val{font-weight:600;white-space:nowrap;}
   .row.tappable:active{background:var(--accent-bg);}
   .empty{padding:22px 0;color:var(--text-soft);font-size:14px;border-bottom:1px solid var(--divider);}
+  .daynav{display:flex;align-items:center;justify-content:space-between;padding:22px 0 14px;border-bottom:1px solid var(--divider);}
+  .daynav .arrow{font-size:24px;color:var(--text);padding:4px 18px;line-height:1;user-select:none;}
+  .daynav .arrow.off{color:var(--divider);pointer-events:none;}
+  .daynav .dlabel{font-weight:600;font-size:17px;}
+  .mealhead{display:flex;justify-content:space-between;align-items:baseline;padding:24px 0 4px;}
+  .mealhead .mt{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-soft);}
+  .mealhead .ms{font-size:13px;color:var(--text-soft);}
 
   /* buttons */
   .btn{display:inline-block;border:1px solid var(--divider);border-radius:0;
@@ -137,7 +144,7 @@
 /* ---------- state ---------- */
 const KEY='mealscan_v1';
 const DEFAULT={
-  settings:{apiKey:'',model:'claude-sonnet-4-6',weightUnit:'kg',heightUnit:'cm',dailyTarget:null},
+  settings:{apiKey:'',model:'gemini-2.5-flash',weightUnit:'kg',heightUnit:'cm',dailyTarget:null},
   entries:[], exercise:[], library:[], weights:[],
   profile:{sex:'male',age:'',height:'',activity:1.2,goal:'maintain',lossRate:500}
 };
@@ -147,12 +154,45 @@ function load(){
   catch(e){return structuredClone(DEFAULT);}
 }
 function save(){localStorage.setItem(KEY,JSON.stringify(state));}
+if(!state.settings.model || /claude/i.test(state.settings.model)) state.settings.model='gemini-2.5-flash';
 let tab='today';
+let viewDate=todayKey();
+const MEALS=['Breakfast','Lunch','Dinner','Snack'];
+function defaultMeal(){const h=new Date().getHours();return h<11?'Breakfast':h<15?'Lunch':h<21?'Dinner':'Snack';}
+function shiftDay(key,delta){const a=key.split('-').map(Number);const d=new Date(a[0],a[1]-1,a[2]);d.setDate(d.getDate()+delta);return dateKey(d);}
+function dayLabel(key){if(key===todayKey())return 'Today';if(key===shiftDay(todayKey(),-1))return 'Yesterday';return new Date(key+'T00:00:00').toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'long'});}
+function mealChips(sel){return `<div class="field"><label>Meal</label><div class="chips mealchips">${MEALS.map(x=>`<button class="chip${x===sel?' sel':''}" data-meal="${x}">${x}</button>`).join('')}</div></div>`;}
+function wireMealChips(root){const box=root.querySelector('.mealchips');let cur=box.querySelector('.chip.sel')?box.querySelector('.chip.sel').dataset.meal:MEALS[0];box.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{cur=c.dataset.meal;box.querySelectorAll('.chip').forEach(x=>x.classList.toggle('sel',x===c));});return ()=>cur;}
+const UNITS=[{u:'gram',g:1},{u:'tsp',g:5},{u:'tbsp',g:15},{u:'cup',g:240},{u:'bowl',g:250},{u:'plate',g:300},{u:'piece',g:50},{u:'slice',g:30},{u:'serving',g:100}];
+function servingWidget(){
+  return `<div class="field"><label>Serving size</label>
+    <select id="sv-unit">${UNITS.map(x=>`<option value="${x.u}">${x.u}</option>`).join('')}</select></div>
+  <div class="field-row">
+    <div class="field"><label>Quantity</label><input type="number" inputmode="decimal" id="sv-qty" value="100"></div>
+    <div class="field" id="sv-gpu-wrap" style="display:none"><label>Grams per serving</label><input type="number" inputmode="decimal" id="sv-gpu" value="1"></div>
+  </div>
+  <div class="hint" id="sv-total"></div>`;
+}
+function wireServing(root,per,initGrams){
+  const unitSel=root.querySelector('#sv-unit'),qty=root.querySelector('#sv-qty'),gpu=root.querySelector('#sv-gpu'),gpuWrap=root.querySelector('#sv-gpu-wrap'),total=root.querySelector('#sv-total');
+  function grams(){return (+qty.value||0)*(+gpu.value||0);}
+  function recompute(){const g=grams();total.textContent=`= ${r1(g)} g${per?` · ${r0(per.calories*g/100)} kcal`:''}`;}
+  function syncUnit(){
+    if(unitSel.value==='gram'){gpuWrap.style.display='none';gpu.value=1;qty.value=100;}
+    else{const d=UNITS.find(x=>x.u===unitSel.value);gpuWrap.style.display='';gpu.value=d.g;qty.value=1;}
+    recompute();
+  }
+  unitSel.onchange=syncUnit;qty.oninput=recompute;gpu.oninput=recompute;
+  if(initGrams){unitSel.value='gram';gpuWrap.style.display='none';gpu.value=1;qty.value=r1(initGrams);}
+  recompute();
+  return {grams,desc:()=>{const u=unitSel.value,q=+qty.value||0;return u==='gram'?`${r1(grams())} g`:`${q} ${u} (${r1(grams())} g)`;}};
+}
 
 /* ---------- helpers ---------- */
 const $=(id)=>document.getElementById(id);
 const el=(html)=>{const t=document.createElement('template');t.innerHTML=html.trim();return t.content.firstChild;};
-function todayKey(){const d=new Date();return d.toISOString().slice(0,10);}
+function dateKey(d){const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const day=String(d.getDate()).padStart(2,'0');return `${y}-${m}-${day}`;}
+function todayKey(){return dateKey(new Date());}
 function fmtDate(){return new Date().toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long'});}
 function r0(n){return Math.round(n||0);}
 function r1(n){return Math.round((n||0)*10)/10;}
@@ -163,8 +203,8 @@ function latestWeightKg(){
   const w=[...state.weights].sort((a,b)=>a.date<b.date?1:-1)[0];
   return w.unit==='lb'?w.weight/2.2046:w.weight;
 }
-function todayFood(){return state.entries.filter(e=>e.date===todayKey());}
-function todayEx(){return state.exercise.filter(e=>e.date===todayKey());}
+function todayFood(){return state.entries.filter(e=>e.date===viewDate);}
+function todayEx(){return state.exercise.filter(e=>e.date===viewDate);}
 function sum(arr,f){return arr.reduce((s,x)=>s+(x[f]||0),0);}
 
 /* ---------- MET table ---------- */
@@ -185,13 +225,16 @@ const MET={
 };
 const QUICK=['Walking','Running','Cycling','Badminton'];
 
+const DB=[{"name": "Ice Kachang", "portion": "1 bowl", "calories": 257.0}, {"name": "Chendol (with coconut & evaporated milk)", "portion": "1 bowl", "calories": 593.0}, {"name": "Bubor Cha Cha", "portion": "1 bowl", "calories": 390.0}, {"name": "Pulut Hitam with coconut milk", "portion": "1 bowl", "calories": 290.0}, {"name": "Tau Suan with you tiao", "portion": "1 bowl", "calories": 293.0}, {"name": "Cheng Tng", "portion": "1 bowl", "calories": 257.0}, {"name": "Red Bean Soup", "portion": "1 bowl", "calories": 278.0}, {"name": "Green Bean Soup", "portion": "1 bowl", "calories": 237.0}, {"name": "Herbal Jelly", "portion": "1 bowl", "calories": 71.0}, {"name": "White Bread", "portion": "1 slice", "calories": 77.0}, {"name": "Whole meal Bread", "portion": "1 slice", "calories": 72.0}, {"name": "Butter", "portion": "1 tsp", "calories": 38.0}, {"name": "Margarine, reduced fat", "portion": "1 tsp", "calories": 18.0}, {"name": "Doughnut, sugared", "portion": "1 piece", "calories": 165.0}, {"name": "Doughnut", "portion": "1 piece", "calories": 304.0}, {"name": "Egg Tart", "portion": "1 piece", "calories": 177.0}, {"name": "Apple Pie", "portion": "1 piece", "calories": 260.0}, {"name": "Roti Prata (plain)", "portion": "1 piece", "calories": 122.0}, {"name": "Roti Prata with egg", "portion": "1 piece", "calories": 289.0}, {"name": "Roti John", "portion": "1 piece", "calories": 571.0}, {"name": "You Tiao", "portion": "1 piece", "calories": 123.0}, {"name": "Char Siew Pau", "portion": "1 bun", "calories": 212.0}, {"name": "Chicken Pau", "portion": "1 bun", "calories": 204.0}, {"name": "Pork Pau", "portion": "1 bun", "calories": 246.0}, {"name": "Ham Chim Peng (red bean filling)", "portion": "1 piece", "calories": 273.0}, {"name": "Mee Chiang Kueh", "portion": "1 piece", "calories": 186.0}, {"name": "Soon Kueh", "portion": "1 piece", "calories": 98.0}, {"name": "Siew Mai", "portion": "1 piece", "calories": 105.0}, {"name": "Chwee Kuay", "portion": "1 whole", "calories": 57.0}, {"name": "Chee Cheong Fun", "portion": "1 piece", "calories": 133.0}, {"name": "Popiah", "portion": "1 piece", "calories": 92.0}, {"name": "Carrot Cake (mashed & fried)", "portion": "1 plate", "calories": 467.0}, {"name": "Oyster Omelette", "portion": "1 plate", "calories": 650.0}, {"name": "Chicken Curry Puff", "portion": "1 piece", "calories": 246.0}, {"name": "Yam Cake", "portion": "1 piece", "calories": 174.0}, {"name": "Fish Otah", "portion": "1 piece", "calories": 18.0}, {"name": "Chicken Satay", "portion": "1 stick", "calories": 35.0}, {"name": "Chinese Rojak", "portion": "1 plate", "calories": 443.0}, {"name": "Indian Rojak", "portion": "1 plate", "calories": 756.0}, {"name": "French Fries", "portion": "1 plate", "calories": 450.0}, {"name": "Fried Chicken Wing", "portion": "1 piece", "calories": 109.0}, {"name": "Fried Chicken Drumstick", "portion": "1 piece", "calories": 207.0}, {"name": "Potato Chips", "portion": "1 plate", "calories": 184.0}, {"name": "Plain Water", "portion": "1 cup", "calories": 0.0}, {"name": "Tea with milk & sugar", "portion": "1 cup", "calories": 59.0}, {"name": "Coffee with milk & sugar", "portion": "1 cup", "calories": 59.0}, {"name": "Fresh Milk", "portion": "1 cup", "calories": 163.0}, {"name": "Low Fat Milk", "portion": "1 cup", "calories": 102.0}, {"name": "Orange Juice", "portion": "1 cup", "calories": 80.0}, {"name": "Sugar Cane Juice", "portion": "1 cup", "calories": 158.0}, {"name": "Soft Drink", "portion": "1 can", "calories": 120.0}, {"name": "Bandung", "portion": "1 glass", "calories": 153.0}, {"name": "Soya Bean Milk (sweetened)", "portion": "1 cup", "calories": 163.0}, {"name": "Barley Water", "portion": "1 cup", "calories": 55.0}, {"name": "Bubble Tea with milk", "portion": "1 glass", "calories": 232.0}, {"name": "Bubble Tea with milk & pearls", "portion": "1 glass", "calories": 340.0}, {"name": "Beer", "portion": "1 glass", "calories": 128.0}, {"name": "Wine (Red / White)", "portion": "1 glass", "calories": 122.0}, {"name": "Mee Rebus", "portion": "1 plate", "calories": 558.0}, {"name": "Mee Siam", "portion": "1 plate", "calories": 519.0}, {"name": "Mee Soto", "portion": "1 bowl", "calories": 432.0}, {"name": "Mee Goreng", "portion": "1 plate", "calories": 660.0}, {"name": "Noodles with Minced Pork & Mushroom (Dry)", "portion": "1 bowl", "calories": 511.0}, {"name": "Ban Mian (with egg, meat & veggies)", "portion": "1 bowl", "calories": 475.0}, {"name": "Fried Kway Teow (with cockles)", "portion": "1 plate", "calories": 743.0}, {"name": "Hor Fun", "portion": "1 plate", "calories": 708.0}, {"name": "Laksa", "portion": "1 bowl", "calories": 589.0}, {"name": "Fried Beehoon (plain)", "portion": "1 plate", "calories": 252.0}, {"name": "Lor Mee", "portion": "1 bowl", "calories": 383.0}, {"name": "Fishball Noodles, Dry", "portion": "1 bowl", "calories": 364.0}, {"name": "Fishball Noodles, Soup", "portion": "1 bowl", "calories": 330.0}, {"name": "Fish Head Beehoon Soup", "portion": "1 bowl", "calories": 666.0}, {"name": "Fish Slice Beehoon Soup", "portion": "1 bowl", "calories": 349.0}, {"name": "Fried Hokkien Prawn Mee", "portion": "1 plate", "calories": 615.0}, {"name": "Prawn Noodles, Dry", "portion": "1 bowl", "calories": 459.0}, {"name": "Prawn Noodles, Soup", "portion": "1 bowl", "calories": 293.0}, {"name": "Wanton Noodles, Dry", "portion": "1 bowl", "calories": 409.0}, {"name": "Wanton Noodles, Soup", "portion": "1 bowl", "calories": 217.0}, {"name": "Kway Chap (with meat, intestine & taupok)", "portion": "1 bowl", "calories": 648.0}, {"name": "Chicken Porridge", "portion": "1 bowl", "calories": 214.0}, {"name": "Fish Porridge", "portion": "1 bowl", "calories": 261.0}, {"name": "Pork Porridge", "portion": "1 bowl", "calories": 362.0}, {"name": "Century Egg Porridge", "portion": "1 bowl", "calories": 422.0}, {"name": "Char Siew Rice", "portion": "1 plate", "calories": 600.0}, {"name": "Duck Rice", "portion": "1 plate", "calories": 706.0}, {"name": "Chicken Rice", "portion": "1 plate", "calories": 702.0}, {"name": "Fried Rice", "portion": "1 plate", "calories": 508.0}, {"name": "Nasi Lemak", "portion": "1 plate", "calories": 600.0}, {"name": "Nasi Briyani with Chicken", "portion": "1 plate", "calories": 880.0}, {"name": "Beef Rendang", "portion": "1 plate", "calories": 228.0}, {"name": "Rice", "portion": "1 bowl", "calories": 260.0}, {"name": "Bak Kut Teh", "portion": "1 bowl", "calories": 342.0}, {"name": "Yong Tauhu Soup", "portion": "1 bowl", "calories": 49.0}, {"name": "Herbal Black Chicken Soup", "portion": "1 bowl", "calories": 186.0}, {"name": "Pig Organ Soup", "portion": "1 bowl", "calories": 158.0}, {"name": "Tom Yam Seafood Soup", "portion": "1 bowl", "calories": 271.0}, {"name": "Watercress & Pork Ribs Soup", "portion": "1 bowl", "calories": 92.0}, {"name": "Mutton Soup", "portion": "1 bowl", "calories": 285.0}, {"name": "Curry Laksa", "portion": "1 bowl", "calories": 589.0}, {"name": "Chicken Curry", "portion": "1 bowl", "calories": 450.0}, {"name": "Fish Head Curry", "portion": "1 plate", "calories": 288.0}, {"name": "Cream of Mushroom", "portion": "1 bowl", "calories": 132.0}, {"name": "Fish & Chips", "portion": "1 serving", "calories": 848.0}, {"name": "Pizza", "portion": "130 g", "calories": 299.0}, {"name": "Spaghetti with Meat Sauce", "portion": "1 plate", "calories": 240.0}, {"name": "Hamburger", "portion": "1 burger", "calories": 252.0}, {"name": "McDouble", "portion": "1 burger", "calories": 392.0}, {"name": "Big Mac", "portion": "1 burger", "calories": 522.0}, {"name": "Cheeseburger", "portion": "1 burger", "calories": 300.0}, {"name": "Double Cheeseburger", "portion": "1 burger", "calories": 440.0}, {"name": "McChicken", "portion": "1 burger", "calories": 385.0}, {"name": "McSpicy", "portion": "1 burger", "calories": 522.0}, {"name": "Double McSpicy", "portion": "1 burger", "calories": 800.0}, {"name": "Filet-O-Fish", "portion": "1 burger", "calories": 332.0}, {"name": "Double Filet-O-Fish", "portion": "1 burger", "calories": 474.0}, {"name": "Quarter Pounder with Cheese", "portion": "1 burger", "calories": 532.0}, {"name": "Double Quarter Pounder with Cheese", "portion": "1 burger", "calories": 768.0}, {"name": "Chicken McNuggets", "portion": "6 pieces", "calories": 303.0}, {"name": "Hotcakes", "portion": "3 pieces", "calories": 557.0}, {"name": "Hotcakes with Sausage", "portion": "3 pieces", "calories": 640.0}, {"name": "Spicy Chicken McWrap", "portion": "1 wrap", "calories": 544.0}, {"name": "McDonald's Big Breakfast", "portion": "1 set", "calories": 525.0}, {"name": "McDonald's Breakfast Deluxe", "portion": "1 set", "calories": 826.0}, {"name": "McDonald's Breakfast Wrap Chicken Ham", "portion": "1 set", "calories": 430.0}, {"name": "McDonald's Breakfast Wrap Chicken Sausage", "portion": "1 set", "calories": 493.0}, {"name": "McDonald's Wholegrain Chicken Muffin", "portion": "1 piece", "calories": 401.0}, {"name": "McDonald's Wholegrain Egg McMuffin", "portion": "1 piece", "calories": 288.0}, {"name": "McDonald's Hotcakes (2pc) Happy Meal", "portion": "1 set", "calories": 442.0}, {"name": "McDonald's Wholegrain Sausage McMuffin", "portion": "1 piece", "calories": 277.0}, {"name": "McDonald's Wholegrain Sausage McMuffin with Egg", "portion": "1 piece", "calories": 356.0}, {"name": "McDonald's Chicken McNuggets (4pc) Happy Meal", "portion": "1 set", "calories": 226.0}, {"name": "McDonald's Chicken McNuggets 6pc", "portion": "1 box", "calories": 303.0}, {"name": "McDonald's Chicken McNuggets 9pc", "portion": "1 box", "calories": 454.0}, {"name": "McDonald's Chicken McNuggets 20pc", "portion": "1 box", "calories": 1009.0}, {"name": "McDonald's McWings", "portion": "1 box", "calories": 498.0}, {"name": "McDonald's Happy Sharing Box A", "portion": "1 box", "calories": 1602.0}, {"name": "McDonald's Happy Sharing Box B", "portion": "1 box", "calories": 801.0}, {"name": "McDonald's Garden Side Salad", "portion": "1 bowl", "calories": 21.0}, {"name": "McDonald's Skinless Grilled Chicken Salad", "portion": "1 plate", "calories": 161.0}, {"name": "McDonald's Skinless Grilled Chicken McWrap", "portion": "1 wrap", "calories": 338.0}, {"name": "McDonald's Red Rice Porridge", "portion": "1 bowl", "calories": 403.0}, {"name": "McDonald's Apple Slices", "portion": "1 pack", "calories": 30.0}, {"name": "McDonald's Corn Cup 3oz", "portion": "1 cup", "calories": 66.0}, {"name": "McDonald's Corn Cup 4.5oz", "portion": "1 cup", "calories": 100.0}, {"name": "McDonald's Hashbrown", "portion": "1 piece", "calories": 149.0}, {"name": "McDonald's Apple Pie", "portion": "1 piece", "calories": 247.0}, {"name": "McDonald's Cinnamon Melts", "portion": "1 piece", "calories": 480.0}, {"name": "McDonald's Vanilla Cone", "portion": "1 cone", "calories": 147.0}, {"name": "McDonald's ChocoCone", "portion": "1 cone", "calories": 296.0}, {"name": "McDonald's Hot Fudge Sundae", "portion": "1 cup", "calories": 343.0}, {"name": "McDonald's Strawberry Sundae", "portion": "1 cup", "calories": 285.0}, {"name": "McDonald's McFlurry Oreo", "portion": "1 cup", "calories": 402.0}, {"name": "McDonald's MudPie McFlurry", "portion": "1 cup", "calories": 532.0}, {"name": "McDonald's Strawberry Shortcake McFlurry", "portion": "1 cup", "calories": 474.0}, {"name": "McDonald's Vanilla Shake", "portion": "1 cup", "calories": 397.0}, {"name": "McDonald's Strawberry Shake", "portion": "1 cup", "calories": 400.0}, {"name": "McDonald's Chocolate Shake", "portion": "1 cup", "calories": 405.0}, {"name": "McDonald's McCafe Latte", "portion": "1 cup", "calories": 186.0}, {"name": "McDonald's McCafe Cappuccino Small", "portion": "1 cup", "calories": 120.0}, {"name": "McDonald's McCafe Cappuccino Medium", "portion": "1 cup", "calories": 170.0}, {"name": "McDonald's Hot Milo", "portion": "1 cup", "calories": 200.0}, {"name": "McDonald's Iced Milo Small", "portion": "1 glass", "calories": 228.0}, {"name": "McDonald's Iced Milo Medium", "portion": "1 glass", "calories": 322.0}, {"name": "McDonald's Caramel Frappe Regular", "portion": "1 glass", "calories": 454.0}, {"name": "McDonald's Caramel Frappe Medium", "portion": "1 glass", "calories": 624.0}, {"name": "KFC Original Recipe Chicken Drumstick", "portion": "1 piece", "calories": 149.0}, {"name": "KFC Original Recipe Chicken Keel", "portion": "1 piece", "calories": 304.0}, {"name": "KFC Original Recipe Chicken Rib", "portion": "1 piece", "calories": 257.0}, {"name": "KFC Original Recipe Chicken Thigh", "portion": "1 piece", "calories": 329.0}, {"name": "KFC Original Recipe Chicken Wing", "portion": "1 piece", "calories": 157.0}, {"name": "KFC Hot & Crispy Chicken Drumstick", "portion": "1 piece", "calories": 212.0}, {"name": "KFC Hot & Crispy Chicken Keel", "portion": "1 piece", "calories": 390.0}, {"name": "KFC Hot & Crispy Chicken Rib", "portion": "1 piece", "calories": 220.0}, {"name": "KFC Hot & Crispy Chicken Thigh", "portion": "1 piece", "calories": 399.0}, {"name": "KFC Hot & Crispy Chicken Wing", "portion": "1 piece", "calories": 190.0}, {"name": "KFC Cheesy Zinger Stacker", "portion": "1 burger", "calories": 1106.0}, {"name": "KFC Zinger", "portion": "1 burger", "calories": 633.0}, {"name": "KFC Shrooms Fillet Burger", "portion": "1 burger", "calories": 386.0}, {"name": "KFC Colonel Burger", "portion": "1 burger", "calories": 451.0}, {"name": "KFC Pockett Bandito", "portion": "1 wrap", "calories": 622.0}, {"name": "KFC Original Recipe Rice Bowl", "portion": "1 bowl", "calories": 440.0}, {"name": "KFC Curry Rice Bowl", "portion": "1 bowl", "calories": 515.0}, {"name": "KFC Famous Potato Bowl", "portion": "1 bowl", "calories": 356.0}, {"name": "KFC Original Recipe Porridge", "portion": "1 bowl", "calories": 221.0}, {"name": "KFC Original Recipe Platter", "portion": "1 plate", "calories": 556.0}, {"name": "KFC Original Recipe Twister", "portion": "1 wrap", "calories": 484.0}, {"name": "KFC American Twister", "portion": "1 wrap", "calories": 461.0}, {"name": "KFC Riser", "portion": "1 burger", "calories": 515.0}, {"name": "KFC Hash Brown", "portion": "1 piece", "calories": 102.0}, {"name": "KFC Hot & Crispy Tenders (3 pcs)", "portion": "1 plate", "calories": 304.0}, {"name": "KFC Hot & Crispy Tenders (5 pcs)", "portion": "1 plate", "calories": 507.0}, {"name": "KFC Nuggets (6 pcs)", "portion": "1 box", "calories": 239.0}, {"name": "KFC Nuggets (20 pcs)", "portion": "1 box", "calories": 796.0}, {"name": "KFC Popcorn Chicken", "portion": "1 cup", "calories": 446.0}, {"name": "KFC Whipped Potato (reg)", "portion": "1 bowl", "calories": 51.0}, {"name": "KFC Whipped Potato (med)", "portion": "1 bowl", "calories": 102.0}, {"name": "KFC Coleslaw (reg)", "portion": "1 bowl", "calories": 98.0}, {"name": "KFC Coleslaw (med)", "portion": "1 bowl", "calories": 197.0}, {"name": "KFC French Fries (reg)", "portion": "1 pack", "calories": 242.0}, {"name": "KFC French Fries (med)", "portion": "1 pack", "calories": 343.0}, {"name": "KFC French Fries (lrg)", "portion": "1 pack", "calories": 367.0}, {"name": "Burger King Hamburger", "portion": "1 serving", "calories": 294.0}, {"name": "Burger King Double Cheeseburger", "portion": "1 serving", "calories": 360.0}, {"name": "Burger King Ultimate Angus Mushroom Swiss", "portion": "1 serving", "calories": 430.0}, {"name": "Burger King Double Mushroom Swiss", "portion": "1 serving", "calories": 621.0}, {"name": "Burger King Ultimate Angus Classic Beef", "portion": "1 serving", "calories": 458.0}, {"name": "Burger King Western Whopper Jr.", "portion": "1 serving", "calories": 431.0}, {"name": "Burger King Double Western Whopper", "portion": "1 serving", "calories": 770.0}, {"name": "Burger King Whopper Jr.", "portion": "1 serving", "calories": 364.0}, {"name": "Burger King Whopper", "portion": "1 serving", "calories": 626.0}, {"name": "Burger King Double Whopper with Cheese", "portion": "1 serving", "calories": 912.0}, {"name": "Burger King BBQ Chick'n Crisp", "portion": "1 serving", "calories": 423.0}, {"name": "Burger King Tendergrill Chicken", "portion": "1 serving", "calories": 438.0}, {"name": "Burger King Long Chicken", "portion": "1 serving", "calories": 602.0}, {"name": "Burger King Tendercrisp Chicken", "portion": "1 serving", "calories": 616.0}, {"name": "Burger King Hash Browns (S)", "portion": "1 serving", "calories": 137.0}, {"name": "Burger King Onion Rings (S)", "portion": "1 serving", "calories": 151.0}, {"name": "Burger King French Fries (S)", "portion": "1 serving", "calories": 183.0}, {"name": "Burger King Cheesy Fries", "portion": "1 serving", "calories": 200.0}, {"name": "Burger King BK Nuggets (9pcs)", "portion": "1 serving", "calories": 352.0}, {"name": "Burger King Vanilla Cone", "portion": "1 serving", "calories": 160.0}, {"name": "Burger King Chocolate Sundae", "portion": "1 serving", "calories": 280.0}, {"name": "Burger King Salad", "portion": "1 serving", "calories": 11.0}, {"name": "MOS Burger Mos Burger", "portion": "1 serving", "calories": 404.0}, {"name": "MOS Burger Mos Cheeseburger", "portion": "1 serving", "calories": 417.0}, {"name": "MOS Burger Mos Chicken", "portion": "1 serving", "calories": 313.0}, {"name": "MOS Burger Mos Vegetable Burger", "portion": "1 serving", "calories": 338.0}, {"name": "MOS Burger Spicy Mos Burger", "portion": "1 serving", "calories": 346.0}, {"name": "MOS Burger Spicy Mos Cheeseburger", "portion": "1 serving", "calories": 408.0}, {"name": "MOS Burger Chicken Burger", "portion": "1 serving", "calories": 378.0}, {"name": "MOS Burger Fish Burger", "portion": "1 serving", "calories": 407.0}, {"name": "MOS Burger Teriyaki Chicken Burger", "portion": "1 serving", "calories": 428.0}, {"name": "MOS Burger Yakiniku Rice Burger", "portion": "1 serving", "calories": 278.0}, {"name": "MOS Burger Unagi Rice Burger", "portion": "1 serving", "calories": 370.0}, {"name": "MOS Burger Green Salad", "portion": "1 serving", "calories": 44.0}, {"name": "MOS Burger Corn Soup", "portion": "1 cup", "calories": 82.0}, {"name": "MOS Burger Chicken Nuggets", "portion": "5 pieces", "calories": 143.0}, {"name": "MOS Burger French Fries (Small)", "portion": "1 serving", "calories": 128.0}, {"name": "MOS Burger French Fries (Large)", "portion": "1 serving", "calories": 263.0}, {"name": "MOS Burger Onion Rings", "portion": "1 serving", "calories": 225.0}, {"name": "Jollibee Cheese Burger", "portion": "1 serving", "calories": 360.0}, {"name": "Jollibee Yum Burger", "portion": "1 serving", "calories": 250.0}, {"name": "Jollibee Jolly Hotdog", "portion": "1 serving", "calories": 389.0}, {"name": "Jollibee Jolly Spaghetti", "portion": "1 serving", "calories": 560.0}, {"name": "Jollibee Chicken Joy Breast", "portion": "1 piece", "calories": 320.0}, {"name": "Jollibee Chicken Joy Drumstick", "portion": "1 piece", "calories": 128.0}, {"name": "Jollibee Chicken Joy Thigh", "portion": "1 piece", "calories": 386.0}, {"name": "Jollibee Burger Steak with Rice", "portion": "1 portion", "calories": 305.0}, {"name": "Jollibee Chocolate Sundae", "portion": "1 serving", "calories": 270.0}, {"name": "Jollibee Regular Crispy Fries", "portion": "1 serving", "calories": 340.0}];
+const SRC={library:'personal library',local:'local database',packaged:'Open Food Facts',barcode:'Open Food Facts',ai:'AI estimate',photo:'photo',manual:'manual'};
+
 const VISION_PROMPT=`You are a nutrition identification assistant. The user sends a meal photo, possibly with a reference object (credit card, coin, or fork) for scale.
 1. Identify each distinct food item.
-2. For each item give nutrition per 100 grams: calories, protein, carbs, fat.
+2. For each item give nutrition per 100 grams: calories, protein, carbs, fat, and sugar (grams).
 3. Using the reference object, give a rough starting weight in grams for each item (the user will correct it).
 4. Note hidden-calorie assumptions (oil, butter, dressing).
 Respond with ONLY valid JSON, no markdown, in this shape:
-{"items":[{"name":"","per_100g":{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0},"estimated_grams":0,"confidence":"low|medium|high"}],"assumptions":""}
+{"items":[{"name":"","per_100g":{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"sugar_g":0},"estimated_grams":0,"confidence":"low|medium|high"}],"assumptions":""}
 If no food is visible, return an empty items array and explain in assumptions.`;
 
 /* ---------- render router ---------- */
@@ -209,6 +252,7 @@ function renderToday(){
   const consumed=sum(food,'calories');
   const burned=sum(ex,'caloriesBurned');
   const target=state.settings.dailyTarget;
+  const atToday = viewDate===todayKey();
   let head;
   if(target){
     const remaining=target-consumed+burned;
@@ -224,6 +268,7 @@ function renderToday(){
         <div>P <b>${r0(sum(food,'protein_g'))}g</b></div>
         <div>C <b>${r0(sum(food,'carbs_g'))}g</b></div>
         <div>F <b>${r0(sum(food,'fat_g'))}g</b></div>
+        <div>S <b>${r0(sum(food,'sugar_g'))}g</b></div>
       </div>
     </div>`;
   }else{
@@ -234,15 +279,29 @@ function renderToday(){
         <div>P <b>${r0(sum(food,'protein_g'))}g</b></div>
         <div>C <b>${r0(sum(food,'carbs_g'))}g</b></div>
         <div>F <b>${r0(sum(food,'fat_g'))}g</b></div>
+        <div>S <b>${r0(sum(food,'sugar_g'))}g</b></div>
       </div>
       <div class="hint">Set a daily target in the Plan tab to see calories remaining.</div>
     </div>`;
   }
-  const foodRows = food.length ? food.map(e=>`
-    <div class="row tappable" data-edit-food="${e.id}">
-      <div><div class="name">${esc(e.name)}</div><div class="sub">${r0(e.grams)} g · ${e.source}</div></div>
-      <div class="val">${r0(e.calories)}</div>
-    </div>`).join('') : `<div class="empty">No food logged yet.</div>`;
+  // food grouped by meal category
+  let foodHtml='';
+  let any=false;
+  MEALS.forEach(mealName=>{
+    const items=food.filter(e=>(e.meal||'Snack')===mealName);
+    if(!items.length)return;
+    any=true;
+    const subtotal=sum(items,'calories');
+    foodHtml+=`<div class="mealhead"><div class="mt">${mealName}</div><div class="ms">${r0(subtotal)} kcal</div></div>`;
+    foodHtml+=items.map(e=>`
+      <div class="row tappable" data-edit-food="${e.id}">
+        <div><div class="name">${esc(e.name)}</div>
+          <div class="sub">${e.servingLabel||r0(e.grams)+' g'}${(e.protein_g||e.carbs_g||e.fat_g||e.sugar_g)?` · P${r0(e.protein_g)} C${r0(e.carbs_g)} F${r0(e.fat_g)} S${r0(e.sugar_g||0)}`:''}</div></div>
+        <div class="val">${r0(e.calories)}</div>
+      </div>`).join('');
+  });
+  if(!any)foodHtml=`<div class="section-label">Food</div><div class="empty">No food logged${atToday?' yet':''}.</div>`;
+
   const exRows = ex.length ? ex.map(e=>`
     <div class="row tappable" data-del-ex="${e.id}">
       <div><div class="name">${esc(e.activity)}</div><div class="sub">${e.minutes} min · ${e.intensity}</div></div>
@@ -251,19 +310,23 @@ function renderToday(){
 
   $('main').innerHTML=`
     <div class="topbar">
-      <div><h1>Today</h1><div class="date">${fmtDate()}</div></div>
+      <div><h1>MealScan</h1></div>
       <button class="linkbtn" id="open-settings">Settings</button>
     </div>
+    <div class="daynav">
+      <div class="arrow" id="day-prev">‹</div>
+      <div class="dlabel">${dayLabel(viewDate)}</div>
+      <div class="arrow${atToday?' off':''}" id="day-next">›</div>
+    </div>
     ${head}
-    <div class="section-label">Food</div>
-    ${foodRows}
+    ${foodHtml}
     <div class="section-label">Activity</div>
     ${exRows}
-    <div style="height:20px"></div>
-    <button class="btn btn-block" id="open-history">View history</button>
+    <div style="height:24px"></div>
   `;
   $('open-settings').onclick=openSettings;
-  $('open-history').onclick=openHistory;
+  $('day-prev').onclick=()=>{viewDate=shiftDay(viewDate,-1);render();};
+  $('day-next').onclick=()=>{if(!atToday){viewDate=shiftDay(viewDate,1);render();}};
   document.querySelectorAll('[data-edit-food]').forEach(n=>n.onclick=()=>editFood(n.dataset.editFood));
   document.querySelectorAll('[data-del-ex]').forEach(n=>n.onclick=()=>{
     if(confirm('Delete this exercise entry?')){state.exercise=state.exercise.filter(x=>x.id!==n.dataset.delEx);save();render();}
@@ -309,48 +372,77 @@ function openAddFood(){
 /* ---------- SEARCH BY NAME ---------- */
 function openSearch(){
   const m=openModal('Search by name',`
-    <div class="field"><label>Brand or food name</label>
-      <input id="sf-q" placeholder="e.g. Milo, rolled oats, greek yogurt" autocomplete="off"></div>
-    <div class="btn-row"><button class="btn btn-primary btn-block" id="sf-go">Search packaged foods</button></div>
-    <div class="hint">Your library is searched as you type; the button also checks the packaged-food database.</div>
+    <div class="field"><label>Food or brand name</label>
+      <input id="sf-q" placeholder="e.g. chicken rice, Big Mac, Milo" autocomplete="off"></div>
+    <div class="btn-row"><button class="btn btn-primary btn-block" id="sf-go">Also search packaged foods</button></div>
+    <div class="hint">Your library and the local database match as you type. The button also checks Open Food Facts; if nothing is found, you'll be offered an AI estimate.</div>
     <div id="sf-lib"></div>
     <div id="sf-results"></div>
   `);
   const q=m.querySelector('#sf-q'), libBox=m.querySelector('#sf-lib'), res=m.querySelector('#sf-results');
-  function pick(name,per,source,g){
-    const stage=el('<div></div>');
-    m.querySelector('#m-body').innerHTML='';
-    m.querySelector('#m-body').appendChild(stage);
+  let dbMatches=[];
+  function pickPer(name,per,source,g){
+    const stage=el('<div></div>'); m.querySelector('#m-body').innerHTML=''; m.querySelector('#m-body').appendChild(stage);
     weighAndLog(m,stage,name,per,source,g);
   }
-  function renderLib(){
+  function pickServing(name,cal,portion,source){
+    const stage=el('<div></div>'); m.querySelector('#m-body').innerHTML=''; m.querySelector('#m-body').appendChild(stage);
+    logServing(m,stage,name,cal,portion,source);
+  }
+  function renderLocal(){
     const term=q.value.trim().toLowerCase();
-    const matches=term?state.library.filter(l=>l.name.toLowerCase().includes(term)):[];
-    libBox.innerHTML=matches.length?`<div class="section-label">In your library</div>`+
-      matches.map(l=>`<div class="row tappable" data-lib="${l.id}"><div><div class="name">${esc(l.name)}</div><div class="sub">${r0(l.per_100g.calories)} kcal/100g · saved</div></div></div>`).join(''):'';
-    libBox.querySelectorAll('[data-lib]').forEach(n=>n.onclick=()=>{const l=state.library.find(x=>x.id===n.dataset.lib);pick(l.name,l.per_100g,'library',l.lastGrams);});
+    let html='';
+    const libM=term?state.library.filter(l=>l.name.toLowerCase().includes(term)):[];
+    if(libM.length)html+=`<div class="section-label">Personal library</div>`+libM.map(l=>{
+      const sub=l.perServing?`${r0(l.perServing.calories)} kcal per ${esc(l.perServing.portion)}`:`${r0(l.per_100g.calories)} kcal/100g`;
+      return `<div class="row tappable" data-lib="${l.id}"><div><div class="name">${esc(l.name)}</div><div class="sub">${sub} · personal library</div></div></div>`;}).join('');
+    dbMatches=term?(DB||[]).filter(f=>f.name.toLowerCase().includes(term)).slice(0,30):[];
+    if(dbMatches.length)html+=`<div class="section-label">Local database</div>`+dbMatches.map((f,i)=>`<div class="row tappable" data-db="${i}"><div><div class="name">${esc(f.name)}</div><div class="sub">${r0(f.calories)} kcal per ${esc(f.portion)} · local database</div></div></div>`).join('');
+    libBox.innerHTML=html;
+    libBox.querySelectorAll('[data-lib]').forEach(n=>n.onclick=()=>{const l=state.library.find(x=>x.id===n.dataset.lib);if(l.perServing)pickServing(l.name,l.perServing.calories,l.perServing.portion,'library');else pickPer(l.name,l.per_100g,'library',l.lastGrams);});
+    libBox.querySelectorAll('[data-db]').forEach(n=>n.onclick=()=>{const f=dbMatches[+n.dataset.db];pickServing(f.name,f.calories,f.portion,'local');});
+  }
+  function offerAI(term){
+    const wrap=el(`<div><div class="empty">No match in your library, the local database, or Open Food Facts for "${esc(term)}".</div><div class="field"><button class="btn btn-primary btn-block" id="sf-aigo">Estimate "${esc(term)}" with AI</button></div></div>`);
+    res.innerHTML=''; res.appendChild(wrap);
+    wrap.querySelector('#sf-aigo').onclick=()=>runAI(term);
+  }
+  async function runAI(term){
+    if(!state.settings.apiKey){res.innerHTML=`<div class="err">Add your Google Gemini API key in Settings to use AI lookup.</div>`;return;}
+    res.innerHTML=`<div class="spinner">Asking AI…</div>`;
+    try{
+      const ai=await aiNutrition(term);
+      if(!ai.per_100g || !ai.per_100g.calories){res.innerHTML=`<div class="err">AI couldn't estimate that. Try a different name or enter it manually.</div>`;return;}
+      res.innerHTML=`<div class="section-label">AI estimate</div>`;
+      const node=el(`<div class="row tappable"><div><div class="name">${esc(ai.name||term)}</div><div class="sub">${r0(ai.per_100g.calories)} kcal/100g · AI estimate</div></div></div>`);
+      node.onclick=()=>pickPer(ai.name||term,ai.per_100g,'ai');
+      res.appendChild(node);
+    }catch(e){res.innerHTML=`<div class="err">${esc(e.message||'AI lookup failed.')}</div>`;}
   }
   async function doSearch(){
     const term=q.value.trim(); if(!term)return;
-    res.innerHTML=`<div class="spinner">Searching packaged foods…</div>`;
+    const localHas=state.library.some(l=>l.name.toLowerCase().includes(term.toLowerCase())) || (DB||[]).some(f=>f.name.toLowerCase().includes(term.toLowerCase()));
+    res.innerHTML=`<div class="spinner">Searching Open Food Facts…</div>`;
     try{
       const url=`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}&search_simple=1&action=process&json=1&page_size=20&fields=code,product_name,brands,nutriments`;
       const r=await fetch(url);
       const data=await r.json();
       const prods=(data.products||[]).filter(p=>p.product_name && p.nutriments && p.nutriments['energy-kcal_100g']!=null);
-      if(!prods.length){res.innerHTML=`<div class="section-label">Packaged foods</div><div class="empty">Nothing found. Try a different term, scan the barcode, or enter it manually.</div>`;return;}
-      res.innerHTML=`<div class="section-label">Packaged foods</div>`+prods.map((p,i)=>{
+      if(!prods.length){ if(localHas){res.innerHTML='';} else {offerAI(term);} return; }
+      res.innerHTML=`<div class="section-label">Open Food Facts</div>`+prods.map((p,i)=>{
         const cal=r0(p.nutriments['energy-kcal_100g']);
-        return `<div class="row tappable" data-off="${i}"><div><div class="name">${esc(p.product_name)}</div><div class="sub">${p.brands?esc(p.brands)+' · ':''}${cal} kcal/100g</div></div></div>`;
-      }).join('');
+        return `<div class="row tappable" data-off="${i}"><div><div class="name">${esc(p.product_name)}</div><div class="sub">${p.brands?esc(p.brands)+' · ':''}${cal} kcal/100g · Open Food Facts</div></div></div>`;
+      }).join('')+`<div class="field"><button class="btn btn-block" id="sf-aibtn">None of these — estimate with AI</button></div>`;
       res.querySelectorAll('[data-off]').forEach(node=>node.onclick=()=>{
         const p=prods[+node.dataset.off], n=p.nutriments;
-        const per={calories:+(n['energy-kcal_100g']||0),protein_g:+(n['proteins_100g']||0),carbs_g:+(n['carbohydrates_100g']||0),fat_g:+(n['fat_100g']||0)};
-        pick(p.product_name,per,'packaged');
+        const per={calories:+(n['energy-kcal_100g']||0),protein_g:+(n['proteins_100g']||0),carbs_g:+(n['carbohydrates_100g']||0),fat_g:+(n['fat_100g']||0),sugar_g:+(n['sugars_100g']||0)};
+        pickPer(p.product_name,per,'packaged');
       });
-    }catch(e){res.innerHTML=`<div class="err">Search failed — the food database may be busy. Try again in a moment, or use the barcode option.</div>`;}
+      res.querySelector('#sf-aibtn').onclick=()=>runAI(term);
+    }catch(e){ offerAI(term); }
   }
-  q.oninput=renderLib;
+  renderLocal();
+  q.oninput=renderLocal;
   q.onkeydown=(e)=>{if(e.key==='Enter'){e.preventDefault();doSearch();}};
   m.querySelector('#sf-go').onclick=doSearch;
 }
@@ -367,7 +459,7 @@ async function toJpegBase64(file,maxDim=1100,q=0.8){
 }
 function openPhoto(){
   if(!state.settings.apiKey){
-    const m=openModal('Scan a photo',`<div class="err">No API key set. Add your Anthropic API key in Settings first.</div><div class="field"><button class="btn btn-primary btn-block" id="go-set">Open Settings</button></div>`);
+    const m=openModal('Scan a photo',`<div class="err">No API key set. Add your Google Gemini API key in Settings first.</div><div class="field"><button class="btn btn-primary btn-block" id="go-set">Open Settings</button></div>`);
     m.querySelector('#go-set').onclick=()=>{m.remove();openSettings();};
     return;
   }
@@ -400,39 +492,49 @@ function openPhoto(){
   };
 }
 async function analyzePhoto(b64){
-  const res=await fetch('https://api.anthropic.com/v1/messages',{
+  const model=state.settings.model||'gemini-2.5-flash';
+  const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(state.settings.apiKey)}`;
+  const res=await fetch(url,{
     method:'POST',
-    headers:{
-      'content-type':'application/json',
-      'x-api-key':state.settings.apiKey,
-      'anthropic-version':'2023-06-01',
-      'anthropic-dangerous-direct-browser-access':'true'
-    },
+    headers:{'content-type':'application/json'},
     body:JSON.stringify({
-      model:state.settings.model,
-      max_tokens:1024,
-      messages:[{role:'user',content:[
-        {type:'image',source:{type:'base64',media_type:'image/jpeg',data:b64}},
-        {type:'text',text:VISION_PROMPT}
-      ]}]
+      contents:[{parts:[
+        {inline_data:{mime_type:'image/jpeg',data:b64}},
+        {text:VISION_PROMPT}
+      ]}],
+      generationConfig:{responseMimeType:'application/json'}
     })
   });
   if(!res.ok){
-    let msg='API error '+res.status;
+    let msg='Gemini API error '+res.status;
     try{const e=await res.json();if(e.error&&e.error.message)msg=e.error.message;}catch(_){}
     throw new Error(msg);
   }
   const data=await res.json();
-  let text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
+  const cand=(data.candidates||[])[0];
+  let text=cand && cand.content && cand.content.parts ? cand.content.parts.map(p=>p.text).filter(Boolean).join('\n').trim() : '';
+  if(!text)throw new Error('Empty response from Gemini.');
   text=text.replace(/```json|```/g,'').trim();
   const s=text.indexOf('{'), e=text.lastIndexOf('}');
   if(s>=0&&e>=0)text=text.slice(s,e+1);
   return JSON.parse(text);
 }
+async function aiNutrition(name){
+  const model=state.settings.model||'gemini-2.5-flash';
+  const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(state.settings.apiKey)}`;
+  const prompt=`Give typical nutrition per 100 grams for this food, assuming the common Singapore version if relevant: "${name}". Respond with ONLY JSON, no markdown: {"name":"","per_100g":{"calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"sugar_g":0}}. If it is not a food, set calories to 0.`;
+  const res=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
+  if(!res.ok){let msg='Gemini API error '+res.status;try{const e=await res.json();if(e.error&&e.error.message)msg=e.error.message;}catch(_){}throw new Error(msg);}
+  const data=await res.json();
+  const cand=(data.candidates||[])[0];
+  let text=cand&&cand.content&&cand.content.parts?cand.content.parts.map(p=>p.text).filter(Boolean).join('\n').trim():'';
+  text=text.replace(/```json|```/g,'').trim();const s=text.indexOf('{'),e=text.lastIndexOf('}');if(s>=0&&e>=0)text=text.slice(s,e+1);
+  return JSON.parse(text);
+}
 function showConfirm(m,stage,result){
   const items=result.items.map(it=>({
     name:it.name||'Item',
-    per:{calories:+(it.per_100g?.calories||0),protein_g:+(it.per_100g?.protein_g||0),carbs_g:+(it.per_100g?.carbs_g||0),fat_g:+(it.per_100g?.fat_g||0)},
+    per:{calories:+(it.per_100g?.calories||0),protein_g:+(it.per_100g?.protein_g||0),carbs_g:+(it.per_100g?.carbs_g||0),fat_g:+(it.per_100g?.fat_g||0),sugar_g:+(it.per_100g?.sugar_g||0)},
     grams:+(it.estimated_grams||100)
   }));
   function rowHtml(it,i){
@@ -449,18 +551,20 @@ function showConfirm(m,stage,result){
     stage.innerHTML=`
       ${result.assumptions?`<div class="note">${esc(result.assumptions)}</div>`:''}
       ${items.map(rowHtml).join('')}
+      ${mealChips(defaultMeal())}
       <div class="toggle-row"><input type="checkbox" id="savelib" style="width:auto"><label for="savelib" style="margin:0">Save these to library</label></div>
       <div class="field"><button class="btn btn-primary btn-block" id="confirm-save">Log ${items.length} item${items.length>1?'s':''}</button></div>`;
+    const getMeal=wireMealChips(stage);
     stage.querySelectorAll('[data-g]').forEach(inp=>inp.oninput=()=>{
       const i=+inp.dataset.g; items[i].grams=+inp.value||0;
       stage.querySelector(`[data-c="${i}"]`).value=r0(items[i].per.calories*items[i].grams/100);
     });
     stage.querySelector('#confirm-save').onclick=()=>{
-      const lib=stage.querySelector('#savelib').checked;
+      const lib=stage.querySelector('#savelib').checked; const meal=getMeal();
       items.forEach(it=>{
-        state.entries.push({id:uid(),date:todayKey(),name:it.name,grams:it.grams,
+        state.entries.push({id:uid(),date:viewDate,meal,name:it.name,grams:it.grams,
           calories:it.per.calories*it.grams/100,protein_g:it.per.protein_g*it.grams/100,
-          carbs_g:it.per.carbs_g*it.grams/100,fat_g:it.per.fat_g*it.grams/100,source:'photo'});
+          carbs_g:it.per.carbs_g*it.grams/100,fat_g:it.per.fat_g*it.grams/100,sugar_g:it.per.sugar_g*it.grams/100,source:'photo'});
         if(lib)addToLibrary(it.name,it.per,it.grams);
       });
       save(); closeModal(m);
@@ -470,8 +574,34 @@ function showConfirm(m,stage,result){
 }
 function addToLibrary(name,per,grams){
   const ex=state.library.find(l=>l.name.toLowerCase()===name.toLowerCase());
-  if(ex){ex.per_100g=per;ex.lastGrams=grams;}
+  if(ex){ex.per_100g=per;ex.lastGrams=grams;delete ex.perServing;}
   else state.library.push({id:uid(),name,per_100g:per,lastGrams:grams});
+}
+function addToLibraryServing(name,calories,portion){
+  const ex=state.library.find(l=>l.name.toLowerCase()===name.toLowerCase());
+  if(ex){ex.perServing={calories,portion};delete ex.per_100g;delete ex.lastGrams;}
+  else state.library.push({id:uid(),name,perServing:{calories,portion}});
+}
+/* log a per-serving item (local database / per-serving library) */
+function logServing(m,stage,name,calories,portion,source){
+  stage.innerHTML=`
+    <div class="item-edit"><div class="nm">${esc(name)} <span style="color:var(--text-soft);font-weight:400">· ${r0(calories)} kcal per ${esc(portion)}</span></div></div>
+    <div class="field"><label>Quantity (number of ${esc(portion)})</label><input type="number" inputmode="decimal" id="ls-q" value="1"></div>
+    <div class="hint" id="ls-total"></div>
+    ${mealChips(defaultMeal())}
+    <div class="toggle-row"><input type="checkbox" id="ls-lib" style="width:auto"><label for="ls-lib" style="margin:0">Save to library</label></div>
+    <div class="field"><button class="btn btn-primary btn-block" id="ls-save">Log item</button></div>`;
+  const getMeal=wireMealChips(stage);
+  const qi=stage.querySelector('#ls-q');
+  const rc=()=>stage.querySelector('#ls-total').textContent=`= ${r0((+qi.value||0)*calories)} kcal`;
+  qi.oninput=rc; rc();
+  stage.querySelector('#ls-save').onclick=()=>{
+    const qty=+qi.value||0;
+    state.entries.push({id:uid(),date:viewDate,meal:getMeal(),name,grams:0,portion,unitCal:calories,servingLabel:`${qty} ${portion}`,
+      calories:qty*calories,protein_g:0,carbs_g:0,fat_g:0,sugar_g:0,source});
+    if(stage.querySelector('#ls-lib').checked)addToLibraryServing(name,calories,portion);
+    save(); closeModal(m);
+  };
 }
 
 /* ---------- BARCODE ---------- */
@@ -508,7 +638,7 @@ function openBarcode(){
       const data=await res.json();
       if(!data.product){stage.innerHTML=`<div class="err">Product not found. Try entering it manually.</div><div class="btn-row"><button class="btn" id="man">Enter manually</button></div>`;stage.querySelector('#man').onclick=()=>{m.remove();openManual();};return;}
       const n=data.product.nutriments||{};
-      const per={calories:+(n['energy-kcal_100g']||0),protein_g:+(n['proteins_100g']||0),carbs_g:+(n['carbohydrates_100g']||0),fat_g:+(n['fat_100g']||0)};
+      const per={calories:+(n['energy-kcal_100g']||0),protein_g:+(n['proteins_100g']||0),carbs_g:+(n['carbohydrates_100g']||0),fat_g:+(n['fat_100g']||0),sugar_g:+(n['sugars_100g']||0)};
       const name=data.product.product_name||('Item '+code);
       weighAndLog(m,stage,name,per,'barcode');
     }catch(e){stage.innerHTML=`<div class="err">Lookup failed. Check your connection or enter manually.</div>`;}
@@ -517,21 +647,19 @@ function openBarcode(){
 
 /* shared: weigh a known per-100g item and log */
 function weighAndLog(m,stage,name,per,source,defGrams){
-  const g0=defGrams||100;
+  per={calories:+per.calories||0,protein_g:+per.protein_g||0,carbs_g:+per.carbs_g||0,fat_g:+per.fat_g||0,sugar_g:+per.sugar_g||0};
   stage.innerHTML=`
-    <div class="item-edit"><div class="nm">${esc(name)} <span style="color:var(--text-soft);font-weight:400">· ${r0(per.calories)} kcal/100g</span></div>
-    <div class="field-row">
-      <div class="field"><label>Weight (g)</label><input type="number" inputmode="decimal" id="wl-g" value="${g0}"></div>
-      <div class="field"><label>Calories</label><input type="text" id="wl-c" value="${r0(per.calories*g0/100)}" disabled></div>
-    </div></div>
+    <div class="item-edit"><div class="nm">${esc(name)} <span style="color:var(--text-soft);font-weight:400">· ${r0(per.calories)} kcal/100g</span></div></div>
+    ${servingWidget()}
+    ${mealChips(defaultMeal())}
     <div class="toggle-row"><input type="checkbox" id="wl-lib" style="width:auto"><label for="wl-lib" style="margin:0">Save to library</label></div>
     <div class="field"><button class="btn btn-primary btn-block" id="wl-save">Log item</button></div>`;
-  const gi=stage.querySelector('#wl-g');
-  gi.oninput=()=>stage.querySelector('#wl-c').value=r0(per.calories*(+gi.value||0)/100);
+  const sv=wireServing(stage,per,defGrams);
+  const getMeal=wireMealChips(stage);
   stage.querySelector('#wl-save').onclick=()=>{
-    const g=+gi.value||0;
-    state.entries.push({id:uid(),date:todayKey(),name,grams:g,
-      calories:per.calories*g/100,protein_g:per.protein_g*g/100,carbs_g:per.carbs_g*g/100,fat_g:per.fat_g*g/100,source});
+    const g=sv.grams();
+    state.entries.push({id:uid(),date:viewDate,meal:getMeal(),name,grams:g,servingLabel:sv.desc(),
+      calories:per.calories*g/100,protein_g:per.protein_g*g/100,carbs_g:per.carbs_g*g/100,fat_g:per.fat_g*g/100,sugar_g:per.sugar_g*g/100,source});
     if(stage.querySelector('#wl-lib').checked)addToLibrary(name,per,g);
     save(); closeModal(m);
   };
@@ -541,15 +669,18 @@ function weighAndLog(m,stage,name,per,source,defGrams){
 function openLibrary(){
   if(!state.library.length){openModal('From library',`<div class="empty" style="border:none">Your library is empty. Save items after logging to reuse them here.</div>`);return;}
   const m=openModal('From library',
-    state.library.map(l=>`<div class="row tappable" data-lib="${l.id}">
-      <div><div class="name">${esc(l.name)}</div><div class="sub">${r0(l.per_100g.calories)} kcal/100g</div></div>
+    state.library.map(l=>{
+      const sub=l.perServing?`${r0(l.perServing.calories)} kcal per ${esc(l.perServing.portion)}`:`${r0(l.per_100g.calories)} kcal/100g`;
+      return `<div class="row tappable" data-lib="${l.id}">
+      <div><div class="name">${esc(l.name)}</div><div class="sub">${sub}</div></div>
       <button class="linkbtn" data-dellib="${l.id}">Remove</button>
-    </div>`).join(''));
+    </div>`;}).join(''));
   m.querySelectorAll('[data-lib]').forEach(n=>n.onclick=(ev)=>{
     if(ev.target.dataset.dellib)return;
     const l=state.library.find(x=>x.id===n.dataset.lib);
     const stage=el('<div></div>');m.querySelector('#m-body').innerHTML='';m.querySelector('#m-body').appendChild(stage);
-    weighAndLog(m,stage,l.name,l.per_100g,'library',l.lastGrams);
+    if(l.perServing)logServing(m,stage,l.name,l.perServing.calories,l.perServing.portion,'library');
+    else weighAndLog(m,stage,l.name,l.per_100g,'library',l.lastGrams);
   });
   m.querySelectorAll('[data-dellib]').forEach(b=>b.onclick=(ev)=>{
     ev.stopPropagation();
@@ -565,17 +696,24 @@ function openManual(){
     <div class="field-row">
       <div class="field"><label>Protein /100g</label><input type="number" inputmode="decimal" id="mn-p" value="0"></div>
       <div class="field"><label>Carbs /100g</label><input type="number" inputmode="decimal" id="mn-c" value="0"></div>
-      <div class="field"><label>Fat /100g</label><input type="number" inputmode="decimal" id="mn-f" value="0"></div>
     </div>
-    <div class="field"><label>Weight (g)</label><input type="number" inputmode="decimal" id="mn-g" value="100"></div>
+    <div class="field-row">
+      <div class="field"><label>Fat /100g</label><input type="number" inputmode="decimal" id="mn-f" value="0"></div>
+      <div class="field"><label>Sugar /100g</label><input type="number" inputmode="decimal" id="mn-s" value="0"></div>
+    </div>
+    ${servingWidget()}
+    ${mealChips(defaultMeal())}
     <div class="toggle-row"><input type="checkbox" id="mn-lib" style="width:auto"><label for="mn-lib" style="margin:0">Save to library</label></div>
     <div class="field"><button class="btn btn-primary btn-block" id="mn-save">Log item</button></div>
   `);
+  const body=m.querySelector('#m-body');
+  const getMeal=wireMealChips(body);
+  const sv=wireServing(body,null,100);
   m.querySelector('#mn-save').onclick=()=>{
     const name=m.querySelector('#mn-name').value.trim()||'Item';
-    const per={calories:+m.querySelector('#mn-cal').value||0,protein_g:+m.querySelector('#mn-p').value||0,carbs_g:+m.querySelector('#mn-c').value||0,fat_g:+m.querySelector('#mn-f').value||0};
-    const g=+m.querySelector('#mn-g').value||0;
-    state.entries.push({id:uid(),date:todayKey(),name,grams:g,calories:per.calories*g/100,protein_g:per.protein_g*g/100,carbs_g:per.carbs_g*g/100,fat_g:per.fat_g*g/100,source:'manual'});
+    const per={calories:+m.querySelector('#mn-cal').value||0,protein_g:+m.querySelector('#mn-p').value||0,carbs_g:+m.querySelector('#mn-c').value||0,fat_g:+m.querySelector('#mn-f').value||0,sugar_g:+m.querySelector('#mn-s').value||0};
+    const g=sv.grams();
+    state.entries.push({id:uid(),date:viewDate,meal:getMeal(),name,grams:g,servingLabel:sv.desc(),calories:per.calories*g/100,protein_g:per.protein_g*g/100,carbs_g:per.carbs_g*g/100,fat_g:per.fat_g*g/100,sugar_g:per.sugar_g*g/100,source:'manual'});
     if(m.querySelector('#mn-lib').checked)addToLibrary(name,per,g);
     save();closeModal(m);
   };
@@ -584,18 +722,35 @@ function openManual(){
 /* edit/delete a food entry */
 function editFood(id){
   const e=state.entries.find(x=>x.id===id);if(!e)return;
+  const perServing=(e.unitCal!=null);
+  const qtyNow=perServing&&e.unitCal?e.calories/e.unitCal:1;
   const per100=e.grams?e.calories/e.grams*100:0;
+  const amountField=perServing
+    ? `<div class="field"><label>Quantity (number of ${esc(e.portion||'serving')})</label><input type="number" inputmode="decimal" id="ef-q" value="${r1(qtyNow)}"></div>
+       <div class="hint">${r0(e.unitCal)} kcal per ${esc(e.portion||'serving')}.</div>`
+    : `<div class="field"><label>Weight (g)</label><input type="number" inputmode="decimal" id="ef-g" value="${r1(e.grams)}"></div>
+       <div class="hint">Calories and macros scale with weight (currently ${r0(per100)} kcal/100g).</div>`;
   const m=openModal('Edit item',`
     <div class="field"><label>Name</label><input id="ef-name" value="${esc(e.name)}"></div>
-    <div class="field"><label>Weight (g)</label><input type="number" inputmode="decimal" id="ef-g" value="${r1(e.grams)}"></div>
-    <div class="hint">Calories scale with weight (currently ${r0(per100)} kcal/100g).</div>
+    ${amountField}
+    ${mealChips(e.meal||defaultMeal())}
+    <div class="toggle-row"><input type="checkbox" id="ef-lib" style="width:auto"><label for="ef-lib" style="margin:0">Save to library</label></div>
     <div class="field"><button class="btn btn-primary btn-block" id="ef-save">Save changes</button></div>
     <div class="field"><button class="btn btn-danger btn-block" id="ef-del">Delete entry</button></div>
   `);
+  const getMeal=wireMealChips(m.querySelector('#m-body'));
   m.querySelector('#ef-save').onclick=()=>{
-    const g=+m.querySelector('#ef-g').value||0;const ratio=e.grams?g/e.grams:0;
     e.name=m.querySelector('#ef-name').value.trim()||e.name;
-    e.calories*=ratio;e.protein_g*=ratio;e.carbs_g*=ratio;e.fat_g*=ratio;e.grams=g;
+    e.meal=getMeal();
+    if(perServing){
+      const qty=+m.querySelector('#ef-q').value||0;
+      e.calories=qty*e.unitCal; e.servingLabel=`${qty} ${e.portion||'serving'}`;
+      if(m.querySelector('#ef-lib').checked)addToLibraryServing(e.name,e.unitCal,e.portion||'serving');
+    }else{
+      const g=+m.querySelector('#ef-g').value||0;const ratio=e.grams?g/e.grams:0;
+      e.calories*=ratio;e.protein_g*=ratio;e.carbs_g*=ratio;e.fat_g*=ratio;e.sugar_g=(e.sugar_g||0)*ratio;e.grams=g;e.servingLabel=r1(g)+' g';
+      if(m.querySelector('#ef-lib').checked && g) addToLibrary(e.name,{calories:e.calories/g*100,protein_g:e.protein_g/g*100,carbs_g:e.carbs_g/g*100,fat_g:e.fat_g/g*100,sugar_g:(e.sugar_g||0)/g*100},g);
+    }
     save();closeModal(m);
   };
   m.querySelector('#ef-del').onclick=()=>{state.entries=state.entries.filter(x=>x.id!==id);save();closeModal(m);};
@@ -640,7 +795,7 @@ function openExercise(){
   m.querySelector('#ex-save').onclick=()=>{
     const min=+m.querySelector('#ex-min').value||0;
     const cal=+m.querySelector('#ex-cal').value||0;
-    state.exercise.push({id:uid(),date:todayKey(),activity,intensity,minutes:min,met:MET[activity][intensity],caloriesBurned:cal});
+    state.exercise.push({id:uid(),date:viewDate,activity,intensity,minutes:min,met:MET[activity][intensity],caloriesBurned:cal});
     save();closeModal(m);
   };
 }
@@ -800,26 +955,16 @@ function renderPlan(){
   compute();
 }
 
-/* ---------- HISTORY ---------- */
-function openHistory(){
-  const days={};
-  state.entries.forEach(e=>{(days[e.date]=days[e.date]||{food:0,ex:0}).food+=e.calories;});
-  state.exercise.forEach(e=>{(days[e.date]=days[e.date]||{food:0,ex:0}).ex+=e.caloriesBurned;});
-  const keys=Object.keys(days).sort().reverse();
-  const body = keys.length ? keys.map(k=>`
-    <div class="row"><div><div class="name">${new Date(k).toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'short'})}</div>
-      <div class="sub">${r0(days[k].ex)} kcal burned</div></div>
-      <div class="val">${r0(days[k].food)} eaten</div></div>`).join('') : `<div class="empty">Nothing logged yet.</div>`;
-  openModal('History',body);
-}
-
 /* ---------- SETTINGS ---------- */
 function openSettings(){
   const s=state.settings;
   const m=openModal('Settings',`
-    <div class="field"><label>Anthropic API key</label>
-      <input type="password" id="s-key" value="${esc(s.apiKey)}" placeholder="sk-ant-..."></div>
-    <div class="hint">Stored only on this device. Used for photo analysis.</div>
+    <div class="field"><label>Google Gemini API key</label>
+      <input type="password" id="s-key" value="${esc(s.apiKey)}" placeholder="AIza..."></div>
+    <div class="hint">Stored only on this device. Used for photo food recognition. Create one free in Google AI Studio.</div>
+    <div class="field"><label>Gemini model</label>
+      <input id="s-model" value="${esc(s.model)}" placeholder="gemini-2.5-flash"></div>
+    <div class="hint">e.g. gemini-2.5-flash or gemini-3.5-flash, depending on your key's access.</div>
     <div class="field-row">
       <div class="field"><label>Weight unit</label><select id="s-wu"><option value="kg">kg</option><option value="lb">lb</option></select></div>
       <div class="field"><label>Height unit</label><select id="s-hu"><option value="cm">cm</option><option value="in">in</option></select></div>
@@ -832,6 +977,7 @@ function openSettings(){
   m.querySelector('#s-wu').value=s.weightUnit;m.querySelector('#s-hu').value=s.heightUnit;
   m.querySelector('#s-save').onclick=()=>{
     s.apiKey=m.querySelector('#s-key').value.trim();
+    s.model=m.querySelector('#s-model').value.trim()||'gemini-2.5-flash';
     s.weightUnit=m.querySelector('#s-wu').value;s.heightUnit=m.querySelector('#s-hu').value;
     s.dailyTarget=+m.querySelector('#s-target').value||null;
     save();closeModal(m);
@@ -844,7 +990,7 @@ function openSettings(){
 }
 
 /* ---------- init ---------- */
-document.querySelectorAll('.tabbar .tab').forEach(t=>t.onclick=()=>{tab=t.dataset.tab;closeAllModals();});
+document.querySelectorAll('.tabbar .tab').forEach(t=>t.onclick=()=>{tab=t.dataset.tab;if(tab==='today')viewDate=todayKey();closeAllModals();});
 render();
 </script>
 </body>

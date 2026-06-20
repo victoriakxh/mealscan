@@ -1,6 +1,6 @@
 # MealScan — Product Requirements Document
 
-**Version:** 1.4
+**Version:** 1.8
 **Owner:** Jupitor
 **Type:** Personal, single-user iOS web app (PWA)
 **Status:** Draft for build
@@ -10,6 +10,10 @@
 - *v1.2: added exercise logging (activity, duration, intensity → calories burned via METs); the daily "remaining" budget now subtracts food and adds back exercise, recalculated live on every entry.*
 - *v1.3: added badminton to the MET table; the owner's frequent activities (walking, running, cycling, badminton) surface at the top of the activity picker.*
 - *v1.4: added search-by-name — type a brand or food name to find matches in the personal library and the packaged-food database (Open Food Facts full-text search), instead of keying a barcode number.*
+- *v1.5: switched food recognition from Anthropic to Google Gemini; added meal categories (Breakfast/Lunch/Dinner/Snack); added sugar to per-item nutrition (now P/C/F + sugar); replaced the history button with day-by-day navigation (arrows at the top of Today) that also lets entries be backfilled to past days.*
+- *v1.6: fixed a timezone bug that broke the forward day-navigation arrow (date math is now consistently local).*
+- *v1.8: added a bundled local database (`food-db.json`, ~250 items scraped from a Singapore calorie chart — food name, portion, calories per portion, no macros). Search now labels every result with its source (personal library / local database / Open Food Facts / AI estimate) and falls back to AI only when none match. Local-database items log by quantity of portion (e.g. "2 plate"). Editing a logged item now also offers Save to library and meal-category change.*
+- *v1.7: dropped the bundled Singapore-foods file. Search now flows library → Open Food Facts → and, when nothing is found, an automatic AI-estimate prompt (Gemini) that covers any dish by name including local food. Logging is no longer fixed to 100g: a serving-size selector (gram, tsp, tbsp, cup, bowl, plate, piece, slice, serving) with an editable grams-per-serving lets quantities be entered in natural units; the gram weight is always shown and stored, and entries display their serving label (e.g. "2 tbsp (30 g)").*
 
 ---
 
@@ -47,7 +51,7 @@ The defining design principle is the separation of **identification** from **qua
 - **Build artifact:** a single self-contained HTML file (inline CSS/JS), hostable on GitHub Pages, no build pipeline.
 - **Hosting:** GitHub Pages (set up from the phone or a Windows machine — the Mac Mini is never involved).
 - **Storage:** browser `localStorage`.
-- **AI provider:** Anthropic Messages API, called directly from the browser with the `anthropic-dangerous-direct-browser-access: true` header. API key entered once in Settings, stored locally. Acceptable because single-user, owner's device only.
+- **AI provider:** Google Gemini API (`generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`), called directly from the browser with the API key in the request URL. The model is configurable in Settings (default `gemini-2.5-flash`). Key entered once in Settings, stored locally. Acceptable because single-user, owner's device only.
 
 ---
 
@@ -102,10 +106,14 @@ Three primary tabs in a bottom navigation bar with text labels (no emojis):
 4. If not found, fall back to manual entry with the barcode noted.
 
 ### 8.2b Input mode — Search by name
-- A single search box. As the user types, the **personal library** is filtered live (instant, local) and shown under an "In your library" heading.
-- Pressing search (button or Enter) also queries the **packaged-food database** for a brand/food name via Open Food Facts full-text search (`/cgi/search.pl?search_terms=...&json=1`), returning up to ~20 products with per-100g nutrition.
-- Results combine both sources; library matches first, packaged foods below. Each result is tappable → the shared weigh-and-log step (enter grams → log), with an optional "Save to library."
-- The packaged database is free and rate-limited; the search degrades gracefully (a neutral "database may be busy" message) and the barcode and manual modes remain as fallbacks. No barcode number entry is required for this path.
+- A single search box. As the user types, the **personal library** is filtered live (instant, local).
+- Pressing search queries the **packaged-food database** via Open Food Facts full-text search (`/cgi/search.pl?search_terms=...&json=1`), returning up to ~20 products.
+- **AI fallback:** if the term is found in neither the library nor Open Food Facts, the user is automatically prompted to **estimate it with AI** (Gemini, text prompt → per-100g JSON). A "None of these — estimate with AI" option is also offered alongside packaged results. This covers any food by name, including local hawker dishes, replacing the earlier bundled-database idea. AI values are labelled as estimates.
+- Each result is tappable → the shared logging step (choose serving size and quantity → log), with an optional "Save to library." The packaged (OFF) search is free and rate-limited and degrades gracefully; barcode and manual remain as fallbacks.
+
+### 8.2c Serving sizes
+- Logging is not fixed to 100g. A **serving-size selector** offers gram, tsp, tbsp, cup, bowl, plate, piece, slice, and serving, each with a default **grams-per-serving** that is editable (because volume/count units vary by food). The user enters a quantity; the app computes total grams = quantity × grams-per-serving, then nutrition from the item's per-100g values.
+- The resolved **gram weight is always shown** live and stored on the entry, and the entry keeps a serving label (e.g. "2 tbsp (30 g)" or "150 g") shown in the daily list. Applies to the search/library/barcode/AI logging step and to manual entry; photo confirm remains gram-based (the model estimates grams directly).
 
 ### 8.3 Input mode — From library
 1. User picks a saved meal; stored per-100g values reused.
@@ -118,12 +126,14 @@ Three primary tabs in a bottom navigation bar with text labels (no emojis):
 - After any logged meal, offer "Save to library."
 - Library items store name, nutrition per 100g, last-used weight. Browsable, searchable, editable, deletable.
 
-### 8.6 Daily log, totals, and remaining budget (Today tab)
-- Today's food entries as a clean list: name, weight, calories per row.
-- A small **Activity** section listing today's exercise entries: activity, duration, calories burned.
-- The live daily budget per §6: prominent **remaining** number with target / food / exercise breakdown beneath, plus protein / carbs / fat totals.
-- History view groups past days; tapping a day shows entries, exercise, and totals.
-- All entries editable and deletable; the budget recalculates immediately.
+### 8.6 Daily view: budget, meals, and day navigation (Today tab)
+- **Day navigation:** arrows at the top (‹ ›) move to the previous/next day; the centre label shows Today / Yesterday / the date. The right arrow is disabled on today (no future). Tapping the Today tab returns to today.
+- The day shown is the **active day**: budget, food, and exercise all reflect it, and new entries are logged to it — so past days can be backfilled by navigating to them first.
+- **Food grouped by meal category** — Breakfast, Lunch, Dinner, Snack — each a section with its own calorie subtotal. A category appears only when it has entries. Category is chosen at log time (defaulting by time of day) and is editable.
+- Each food row shows weight and a compact macro line: protein, carbs, fat, and **sugar** (grams), with calories on the right.
+- A small **Activity** section lists the day's exercise entries.
+- The live daily budget per §6: prominent **remaining** number with target / food / exercise breakdown, plus P / C / F / sugar totals.
+- All entries editable and deletable; the budget recalculates immediately. The previous bottom "View history" button is replaced by the day-navigation arrows.
 
 ### 8.7 Exercise logging (Today tab)
 - Opened from the Today "+" button ("Add food" / "Add exercise").
@@ -200,7 +210,7 @@ Three primary tabs in a bottom navigation bar with text labels (no emojis):
 > You are a nutrition identification assistant. The user sends a meal photo, possibly with a reference object (credit card, coin, or fork) for scale.
 >
 > 1. Identify each distinct food item.
-> 2. For each item give nutrition **per 100 grams**: calories, protein, carbs, fat.
+> 2. For each item give nutrition **per 100 grams**: calories, protein, carbs, fat, and sugar (grams).
 > 3. Using the reference object, give a rough starting weight in grams for each item (the user will correct it).
 > 4. Note hidden-calorie assumptions (oil, butter, dressing).
 >
@@ -208,7 +218,7 @@ Three primary tabs in a bottom navigation bar with text labels (no emojis):
 > ```json
 > {
 >   "items": [
->     {"name": "", "per_100g": {"calories": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0}, "estimated_grams": 0, "confidence": "low|medium|high"}
+>     {"name": "", "per_100g": {"calories": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0, "sugar_g": 0}, "estimated_grams": 0, "confidence": "low|medium|high"}
 >   ],
 >   "assumptions": ""
 > }
@@ -223,9 +233,9 @@ Parse robustly: strip markdown fences, attempt JSON parse, on failure show an er
 
 ```
 settings   = { apiKey, weightUnit, heightUnit, dailyTarget? }
-entries    = [ { id, date, name, grams, calories, protein_g, carbs_g, fat_g, source } ]
+entries    = [ { id, date, meal, name, grams, servingLabel, calories, protein_g, carbs_g, fat_g, sugar_g, source, portion?, unitCal? } ]
 exercise   = [ { id, date, activity, intensity, minutes, met, caloriesBurned } ]
-library    = [ { id, name, per_100g:{calories,protein_g,carbs_g,fat_g}, lastGrams } ]
+library    = [ { id, name, per_100g:{...}, lastGrams }  OR  { id, name, perServing:{calories,portion} } ]
 weights    = [ { date, weight, unit } ]
 profile    = { sex, age, height, activity, goal, lossRate }
 ```
