@@ -12,6 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <style>
   :root{
@@ -197,6 +198,13 @@
   .preset-sw{width:28px;height:28px;border-radius:50%;flex:none;}
   .preset .pn{display:block;font-family:var(--display);font-weight:600;font-size:15px;color:var(--text);}
   .preset .pd{display:block;font-size:12px;color:var(--text-soft);margin-top:3px;}
+
+  #auth-screen{min-height:100vh;align-items:center;justify-content:center;padding:24px;}
+  .auth-wrap{width:100%;max-width:380px;background:var(--surface);border-radius:26px;padding:30px 24px;box-shadow:0 12px 34px rgba(43,42,38,.12);}
+  .auth-logo{font-family:var(--display);font-weight:800;font-size:32px;color:var(--accent-strong);text-align:center;}
+  .auth-tag{text-align:center;color:var(--text-soft);font-size:14px;margin:8px 0 20px;}
+  .auth-or{text-align:center;color:var(--text-soft);font-size:12px;margin:14px 0;letter-spacing:.04em;}
+  #auth-msg:not(:empty){margin-bottom:6px;}
 </style>
 </head>
 <body>
@@ -210,10 +218,16 @@
   <div class="tab" data-tab="plan"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2.5"/><path d="M9 3h6v3H9z"/><path d="M9 11h6M9 15h4"/></svg><span class="tlabel">Plan</span></div>
 </div>
 <div id="modal-root"></div>
+<div id="auth-screen" style="display:none"></div>
 
 <script>
 /* ---------- state ---------- */
 const KEY='mealscan_v1';
+/* ====== Supabase cloud config — paste your project's values to enable accounts & cloud sync.
+   Leave both blank to keep the app local-only (no login). ====== */
+const SUPABASE_URL='https://jjupcfisuqnvjeokafnj.supabase.co';       // e.g. https://abcdefgh.supabase.co
+const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpqdXBjZmlzdXFudmplb2thZm5qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwNDIyNzUsImV4cCI6MjA5NzYxODI3NX0.aGnnEayj0yB6_x6U5bycwiFqtzqt2WaVHk1frGroZ5s';  // your project's anon (public) key
+let sb=null, user=null, CLOUD=false;
 const DEFAULT={
   settings:{apiKey:'',model:'gemini-2.5-flash',weightUnit:'kg',heightUnit:'cm',dailyTarget:null,theme:'pink'},
   entries:[], exercise:[], library:[], weights:[],
@@ -224,7 +238,8 @@ function load(){
   try{const s=JSON.parse(localStorage.getItem(KEY));return s?Object.assign(structuredClone(DEFAULT),s):structuredClone(DEFAULT);}
   catch(e){return structuredClone(DEFAULT);}
 }
-function save(){localStorage.setItem(KEY,JSON.stringify(state));}
+function saveLocal(){localStorage.setItem(KEY,JSON.stringify(state));}
+function save(){saveLocal();scheduleCloudPush();}
 if(!state.settings.model || /claude/i.test(state.settings.model)) state.settings.model='gemini-2.5-flash';
 if(!state.settings.theme) state.settings.theme='pink';
 const THEMES={
@@ -1165,6 +1180,7 @@ function openSettings(){
     </div>
     <div class="field"><label>Daily calorie target</label><input type="number" inputmode="numeric" id="s-target" value="${s.dailyTarget||''}" placeholder="set here or in Plan"></div>
     <div class="field"><button class="btn btn-primary btn-block" id="s-save">Save settings</button></div>
+    ${(CLOUD&&user)?`<div class="sub-h">Account</div><div class="hint">Signed in as ${esc(user.email||'your account')}. Your data syncs to the cloud.</div><div class="field"><button class="btn btn-block" id="s-signout">Sign out</button></div>`:''}
     <div class="sub-h">Data</div>
     <div class="btn-row"><button class="btn" id="s-export">Export JSON</button><button class="btn btn-danger" id="s-clear">Clear all data</button></div>
     <div class="sub-h">Food database</div>
@@ -1233,7 +1249,82 @@ function openSettings(){
     const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='nomnom-data.json';a.click();
   };
-  overlay.querySelector('#s-clear').onclick=()=>{if(confirm('Erase all data? This cannot be undone.')){localStorage.removeItem(KEY);state=structuredClone(DEFAULT);close();}};
+  const so=overlay.querySelector('#s-signout'); if(so)so.onclick=()=>{overlay.remove();signOut();};
+  overlay.querySelector('#s-clear').onclick=()=>{if(confirm('Erase all data? This cannot be undone.')){localStorage.removeItem(KEY);state=structuredClone(DEFAULT);if(CLOUD&&user){saveLocal();pushCloud();}close();}};
+}
+
+/* ---------- cloud sync (Supabase) ---------- */
+function initCloud(){
+  if(SUPABASE_URL && /^https?:\/\//.test(SUPABASE_URL) && window.supabase){
+    try{ sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY); CLOUD=true; }catch(e){ CLOUD=false; }
+  }
+}
+let _pushT=null;
+function scheduleCloudPush(){ if(!CLOUD||!user)return; clearTimeout(_pushT); _pushT=setTimeout(pushCloud,800); }
+async function pushCloud(){ if(!CLOUD||!user)return; try{ await sb.from('profiles').upsert({id:user.id,data:state,updated_at:new Date().toISOString()}); }catch(e){} }
+function hasData(){ return (state.entries&&state.entries.length)||(state.weights&&state.weights.length)||(state.exercise&&state.exercise.length)||(state.library&&state.library.length); }
+async function loadCloudIntoState(){
+  let row=null;
+  try{ const r=await sb.from('profiles').select('data').eq('id',user.id).maybeSingle(); row=r.data; }catch(e){}
+  if(row&&row.data){ state=Object.assign(structuredClone(DEFAULT),row.data); saveLocal(); }   // cloud wins
+  else if(hasData()){ await pushCloud(); }                                                       // migrate this device's data up
+}
+async function onAuth(){
+  if(user){ try{ await loadCloudIntoState(); }catch(e){} showApp(); }
+  else showLogin();
+}
+async function signOut(){ try{ await sb.auth.signOut(); }catch(e){} user=null; try{localStorage.removeItem(KEY);}catch(e){} state=structuredClone(DEFAULT); showLogin(); }
+function showApp(){
+  const a=document.getElementById('auth-screen'); if(a)a.style.display='none';
+  document.getElementById('app').style.display='';
+  document.querySelector('.tabbar').style.display='';
+  render(); layout();
+}
+function showLogin(){
+  document.getElementById('app').style.display='none';
+  document.querySelector('.tabbar').style.display='none';
+  const fab=document.getElementById('fab'); if(fab)fab.style.display='none';
+  applyTheme(state.settings.theme);
+  const s=document.getElementById('auth-screen'); s.style.display='flex';
+  s.innerHTML=`<div class="auth-wrap">
+    <div class="auth-logo">NomNom</div>
+    <div class="auth-tag">Sign in to sync your food log across your devices.</div>
+    <div id="auth-msg"></div>
+    <div class="field"><label>Email</label><input id="auth-email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com"></div>
+    <button class="btn btn-primary btn-block" id="auth-magic">Email me a sign-in link</button>
+    <div class="auth-or">or</div>
+    <button class="btn btn-block" id="auth-google">Continue with Google</button>
+  </div>`;
+  const msg=s.querySelector('#auth-msg');
+  const redirect=location.href.split('#')[0].split('?')[0];
+  s.querySelector('#auth-magic').onclick=async()=>{
+    const email=s.querySelector('#auth-email').value.trim();
+    if(!email){msg.innerHTML='<div class="err">Enter your email.</div>';return;}
+    msg.innerHTML='<div class="hint">Sending…</div>';
+    try{ const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:redirect}}); if(error)throw error;
+      msg.innerHTML='<div class="note">Check your email for a sign-in link, then return here.</div>';
+    }catch(e){ msg.innerHTML='<div class="err">'+esc(e.message||'Could not send the link.')+'</div>'; }
+  };
+  s.querySelector('#auth-google').onclick=async()=>{
+    msg.innerHTML='<div class="hint">Redirecting to Google…</div>';
+    try{ const {error}=await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:redirect}}); if(error)throw error; }
+    catch(e){ msg.innerHTML='<div class="err">'+esc(e.message||'Google sign-in failed.')+'</div>'; }
+  };
+}
+async function boot(){
+  initCloud();
+  if(!CLOUD){ render(); layout(); return; }
+  document.getElementById('app').style.display='none';
+  document.querySelector('.tabbar').style.display='none';
+  const fab=document.getElementById('fab'); if(fab)fab.style.display='none';
+  const s=document.getElementById('auth-screen'); s.style.display='flex';
+  s.innerHTML='<div class="auth-wrap"><div class="auth-logo">NomNom</div><div class="auth-tag">Loading…</div></div>';
+  try{
+    const {data}=await sb.auth.getSession();
+    user=(data&&data.session&&data.session.user)||null;
+    sb.auth.onAuthStateChange((_e,sess)=>{ const u=(sess&&sess.user)||null; const changed=((u&&u.id)||null)!==((user&&user.id)||null); user=u; if(changed) onAuth(); });
+    await onAuth();
+  }catch(e){ CLOUD=false; document.getElementById('app').style.display=''; document.querySelector('.tabbar').style.display=''; render(); layout(); }
 }
 
 /* ---------- init ---------- */
@@ -1242,8 +1333,7 @@ window.addEventListener('resize',layout);
 window.addEventListener('orientationchange',()=>setTimeout(layout,250));
 if(window.visualViewport)window.visualViewport.addEventListener('resize',layout);
 window.addEventListener('load',layout);
-render();
-layout();
+boot();
 </script>
 </body>
 </html>
