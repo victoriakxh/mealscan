@@ -285,6 +285,9 @@
   .scan-hint{position:relative;color:rgba(255,255,255,.92);font-size:13px;padding-bottom:18px;}
   .bc-box{position:absolute;top:46%;left:50%;transform:translate(-50%,-50%);width:64%;height:92px;border:2px solid rgba(255,255,255,.55);border-radius:12px;}
   .bc-line{position:absolute;top:46%;left:20%;right:20%;height:2px;background:#ff5a6a;box-shadow:0 0 8px #ff5a6a;}
+  #reader{position:absolute;inset:0;width:100%;height:100%;}
+  #reader video{width:100%!important;height:100%!important;object-fit:cover!important;display:block;}
+  #reader img,#reader__dashboard{display:none!important;}
   .dashed-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:14px;padding:14px;border-radius:15px;border:1.5px dashed var(--accent);background:var(--accent-bg);color:var(--accent-strong);font-family:var(--body);font-weight:600;font-size:14px;cursor:pointer;}
   .dashed-btn svg{width:18px;height:18px;}
   .found-card{display:flex;align-items:center;gap:12px;background:var(--accent-bg);border-radius:16px;padding:13px 14px;margin-top:14px;}
@@ -708,9 +711,9 @@ function openAdd(){
         </div>`).join('')}</div>`:''}`;
     body.querySelector('#af-search').onclick=()=>go(openSearch);
     body.querySelector('#af-scan').onclick=()=>renderScan();
-    body.querySelector('#af-bar').onclick=()=>go(openBarcode);
-    body.querySelector('#af-lib').onclick=()=>go(openLibrary);
-    body.querySelector('#af-man').onclick=()=>go(openManual);
+    body.querySelector('#af-bar').onclick=()=>renderBarcode();
+    body.querySelector('#af-lib').onclick=()=>renderLibrary();
+    body.querySelector('#af-man').onclick=()=>renderManual();
     body.querySelectorAll('[data-rl]').forEach(b=>b.onclick=()=>{relogFood(recents[+b.dataset.rl]);sh.close();});
   }
 
@@ -750,6 +753,110 @@ function openAdd(){
     body.querySelector('#sc-shot').onclick=()=>{ if(live&&_camStream){ analyze(camCapture(video)); } else { nativeShot(); } };
     body.querySelector('#sc-up').onclick=()=>{ file.removeAttribute('capture'); file.click(); };
     file.onchange=async(ev)=>{ const f=ev.target.files[0]; if(!f)return; camStop(); try{ analyze(await toJpegBase64(f)); }catch(e){ body.querySelector('#sc-stage').innerHTML=`<div class="err">Could not read that image.</div>`; } };
+  }
+
+  function renderBarcode(){
+    camStop();
+    let scanner=null;
+    const stopScanner=()=>{ if(scanner){try{scanner.stop().then(()=>{try{scanner.clear();}catch(_){}}).catch(()=>{});}catch(_){}scanner=null;} };
+    body.innerHTML=`
+      <div class="sub-head"><button class="circ-back" id="bc-back">${IC_BACK}</button><h3>Scan a barcode</h3></div>
+      <div class="scan-frame" id="bc-view" style="aspect-ratio:auto;height:210px"><div id="reader"></div><div class="bc-box"></div><div class="bc-line"></div><div class="scan-hint">Align the barcode within the frame</div></div>
+      <div class="field" style="margin-top:12px"><input type="number" inputmode="numeric" id="bc-num" placeholder="…or type the barcode number"></div>
+      <div class="btn-row"><button class="btn" id="bc-scan">Scan with camera</button><button class="btn btn-primary" id="bc-look">Look up</button></div>
+      <div id="bc-stage"></div>`;
+    const stage=body.querySelector('#bc-stage');
+    body.querySelector('#bc-back').onclick=()=>{stopScanner();renderFood();};
+    const startScan=async()=>{
+      if(typeof Html5Qrcode==='undefined'){stage.innerHTML=`<div class="hint">Camera scanning unavailable here — type the barcode number instead.</div>`;return;}
+      try{ scanner=new Html5Qrcode('reader'); await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:230,height:130}},(txt)=>{stopScanner();body.querySelector('#bc-num').value=txt;doLookup(txt);},()=>{}); }
+      catch(e){ stage.innerHTML=`<div class="hint">Could not start the camera — type the barcode number instead.</div>`; }
+    };
+    body.querySelector('#bc-scan').onclick=startScan;
+    body.querySelector('#bc-view').onclick=startScan;
+    body.querySelector('#bc-look').onclick=()=>doLookup(body.querySelector('#bc-num').value.trim());
+    async function doLookup(code){
+      if(!code){stage.innerHTML=`<div class="err">Enter a barcode number.</div>`;return;}
+      stopScanner();
+      stage.innerHTML=`<div class="spinner">${ONDB?'Looking up product…':'Loading food database (first time only, ~10 MB)…'}</div>`;
+      try{ await ensureONDB(); const hit=ONBYEAN&&ONBYEAN.get(String(code)); if(hit){ result(hit[0],{calories:hit[1],protein_g:hit[2],carbs_g:hit[3],fat_g:hit[4],sugar_g:hit[5]},'opennutrition',hit[6]); return; } }catch(e){}
+      stage.innerHTML=`<div class="spinner">Looking up product…</div>`;
+      try{
+        const res=await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,nutriments`);
+        const data=await res.json();
+        if(!data.product){ stage.innerHTML=`<div class="err">Product not found. Try entering it manually.</div><button class="btn btn-block" id="bc-man" style="margin-top:10px">Enter manually</button>`; stage.querySelector('#bc-man').onclick=renderManual; return; }
+        const n=data.product.nutriments||{};
+        result(data.product.product_name||('Item '+code),{calories:+(n['energy-kcal_100g']||0),protein_g:+(n['proteins_100g']||0),carbs_g:+(n['carbohydrates_100g']||0),fat_g:+(n['fat_100g']||0),sugar_g:+(n['sugars_100g']||0)},'barcode');
+      }catch(e){ stage.innerHTML=`<div class="err">Lookup failed. Check your connection or enter manually.</div>`; }
+    }
+    function result(name,per,source,g){
+      body.innerHTML=`<div class="sub-head"><button class="circ-back" id="bc-b2">${IC_BACK}</button><h3>Add item</h3></div><div id="bc-stage2"></div>`;
+      body.querySelector('#bc-b2').onclick=renderBarcode;
+      weighAndLog(null,body.querySelector('#bc-stage2'),name,per,source,g,()=>sh.close());
+    }
+  }
+
+  function renderLibrary(){
+    camStop();
+    body.innerHTML=`<div class="sub-head"><button class="circ-back" id="lb-back">${IC_BACK}</button><h3>Library</h3></div>
+      <div class="seg" id="lib-tabs"><button data-t="recent" class="on">Recent</button><button data-t="saved">Saved</button><button data-t="mine">My foods</button></div>
+      <div id="lib-body" style="margin-top:10px"></div>`;
+    body.querySelector('#lb-back').onclick=renderFood;
+    const lb=body.querySelector('#lib-body');
+    const tabs=body.querySelectorAll('#lib-tabs button');
+    const rowHtml=(name,sub,attr)=>`<div class="recent-row"><span class="recent-ic">${IC_FORK}</span><div class="recent-main"><div class="rn">${esc(name)}</div><div class="rs">${esc(sub)}</div></div><button class="recent-add" ${attr} aria-label="Add">${IC_PLUS}</button></div>`;
+    const distinct=()=>{const seen=new Set(),out=[];for(let i=state.entries.length-1;i>=0;i--){const e=state.entries[i],k=(e.name||'').toLowerCase();if(!e.name||seen.has(k))continue;seen.add(k);out.push({name:e.name,sub:`${e.servingLabel||(e.grams?r0(e.grams)+' g':'')} · ${r0(e.calories)} kcal`,entry:e});}return out;};
+    function quickList(list){
+      if(!list.length){lb.innerHTML=`<div class="empty" style="border:none">Nothing logged yet.</div>`;return;}
+      lb.innerHTML=list.map((r,i)=>rowHtml(r.name,r.sub,`data-i="${i}"`)).join('');
+      lb.querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{relogFood(list[+b.dataset.i]);sh.close();});
+    }
+    function showSaved(){
+      const lib2=state.library;
+      if(!lib2.length){lb.innerHTML=`<div class="empty" style="border:none">Your library is empty. Tick “Save to library” after logging to reuse items here.</div>`;return;}
+      lb.innerHTML=lib2.map(l=>{const sub=l.perServing?`${r0(l.perServing.calories)} kcal per ${esc(l.perServing.portion)}`:`${r0(l.per_100g.calories)} kcal/100g`;return rowHtml(l.name,sub,`data-lib="${l.id}"`);}).join('');
+      lb.querySelectorAll('[data-lib]').forEach(b=>b.onclick=()=>{
+        const l=state.library.find(x=>x.id===b.dataset.lib);
+        body.innerHTML=`<div class="sub-head"><button class="circ-back" id="lb-b2">${IC_BACK}</button><h3>Add item</h3></div><div id="lb-stage"></div>`;
+        body.querySelector('#lb-b2').onclick=renderLibrary;
+        const stage=body.querySelector('#lb-stage');
+        if(l.perServing)logServing(null,stage,l.name,l.perServing.calories,l.perServing.portion,'library',()=>sh.close());
+        else weighAndLog(null,stage,l.name,l.per_100g,'library',l.lastGrams,()=>sh.close());
+      });
+    }
+    tabs.forEach(b=>b.onclick=()=>{tabs.forEach(x=>x.classList.toggle('on',x===b));const t=b.dataset.t;t==='recent'?quickList(recentFoods(20)):t==='mine'?quickList(distinct()):showSaved();});
+    quickList(recentFoods(20));
+  }
+
+  function renderManual(){
+    camStop();
+    body.innerHTML=`<div class="sub-head"><button class="circ-back" id="mn-back">${IC_BACK}</button><h3>Enter manually</h3></div>
+      <div class="mfield"><label>Food name</label><input id="mn-name" placeholder="e.g. Avocado toast"></div>
+      <div style="margin-top:12px"><label class="mlbl">Meal</label><div class="seg" id="mn-meal">${MEALS.map(x=>`<button data-meal="${x}"${x===defaultMeal()?' class="on"':''}>${x}</button>`).join('')}</div></div>
+      <div class="mrow" style="margin-top:12px">
+        <div class="mfield"><label>Serving (g)</label><input type="number" inputmode="decimal" id="mn-serv" value="100"></div>
+        <div class="mfield"><label>Servings</label><input type="number" inputmode="decimal" id="mn-qty" value="1"></div>
+      </div>
+      <div class="mcal"><label>Calories</label><div class="calwrap"><input type="number" inputmode="numeric" id="mn-cal" placeholder="0"><span class="calu">kcal</span></div></div>
+      <div class="mrow" style="margin-top:12px">
+        <div class="mfield"><label>Protein</label><input type="number" inputmode="decimal" id="mn-p" value="0"></div>
+        <div class="mfield"><label>Carbs</label><input type="number" inputmode="decimal" id="mn-c" value="0"></div>
+        <div class="mfield"><label>Fat</label><input type="number" inputmode="decimal" id="mn-f" value="0"></div>
+      </div>
+      <div class="toggle-row" style="margin-top:12px"><input type="checkbox" id="mn-lib" style="width:auto"><label for="mn-lib" style="margin:0">Save to library</label></div>
+      <button class="btn btn-primary btn-block" id="mn-save" style="margin-top:14px">Add food</button>`;
+    body.querySelector('#mn-back').onclick=renderFood;
+    let meal=defaultMeal();
+    body.querySelectorAll('#mn-meal button').forEach(b=>b.onclick=()=>{meal=b.dataset.meal;body.querySelectorAll('#mn-meal button').forEach(x=>x.classList.toggle('on',x===b));});
+    body.querySelector('#mn-save').onclick=()=>{
+      const name=body.querySelector('#mn-name').value.trim()||'Item';
+      const servG=+body.querySelector('#mn-serv').value||0, qty=+body.querySelector('#mn-qty').value||1;
+      const cal=+body.querySelector('#mn-cal').value||0, p=+body.querySelector('#mn-p').value||0, c=+body.querySelector('#mn-c').value||0, f=+body.querySelector('#mn-f').value||0;
+      const grams=servG*qty;
+      state.entries.push({id:uid(),date:viewDate,meal,name,grams,servingLabel:`${r1(qty)} × ${r0(servG)} g`,calories:cal*qty,protein_g:p*qty,carbs_g:c*qty,fat_g:f*qty,sugar_g:0,source:'manual'});
+      if(body.querySelector('#mn-lib').checked && servG>0) addToLibrary(name,{calories:cal*100/servG,protein_g:p*100/servG,carbs_g:c*100/servG,fat_g:f*100/servG,sugar_g:0},servG);
+      save();sh.close();
+    };
   }
 
   function renderExercise(){
@@ -1072,7 +1179,7 @@ function addToLibraryServing(name,calories,portion){
   else state.library.push({id:uid(),name,perServing:{calories,portion}});
 }
 /* log a per-serving item (local database / per-serving library) */
-function logServing(m,stage,name,calories,portion,source){
+function logServing(m,stage,name,calories,portion,source,onDone){
   stage.innerHTML=`
     <div class="item-edit"><div class="nm">${esc(name)} <span style="color:var(--text-soft);font-weight:400">· ${r0(calories)} kcal per ${esc(portion)}</span></div></div>
     <div class="field"><label>Quantity (number of ${esc(portion)})</label><input type="number" inputmode="decimal" id="ls-q" value="1"></div>
@@ -1089,7 +1196,7 @@ function logServing(m,stage,name,calories,portion,source){
     state.entries.push({id:uid(),date:viewDate,meal:getMeal(),name,grams:0,portion,unitCal:calories,servingLabel:`${qty} ${portion}`,
       calories:qty*calories,protein_g:0,carbs_g:0,fat_g:0,sugar_g:0,source});
     if(stage.querySelector('#ls-lib').checked)addToLibraryServing(name,calories,portion);
-    save(); closeModal(m);
+    save(); onDone?onDone():closeModal(m);
   };
 }
 
@@ -1144,7 +1251,7 @@ function openBarcode(){
 }
 
 /* shared: weigh a known per-100g item and log */
-function weighAndLog(m,stage,name,per,source,defGrams){
+function weighAndLog(m,stage,name,per,source,defGrams,onDone){
   per={calories:+per.calories||0,protein_g:+per.protein_g||0,carbs_g:+per.carbs_g||0,fat_g:+per.fat_g||0,sugar_g:+per.sugar_g||0};
   stage.innerHTML=`
     <div class="item-edit"><div class="nm">${esc(name)} <span style="color:var(--text-soft);font-weight:400">· ${r0(per.calories)} kcal/100g</span></div></div>
@@ -1159,7 +1266,7 @@ function weighAndLog(m,stage,name,per,source,defGrams){
     state.entries.push({id:uid(),date:viewDate,meal:getMeal(),name,grams:g,servingLabel:sv.desc(),
       calories:per.calories*g/100,protein_g:per.protein_g*g/100,carbs_g:per.carbs_g*g/100,fat_g:per.fat_g*g/100,sugar_g:per.sugar_g*g/100,source});
     if(stage.querySelector('#wl-lib').checked)addToLibrary(name,per,g);
-    save(); closeModal(m);
+    save(); onDone?onDone():closeModal(m);
   };
 }
 
