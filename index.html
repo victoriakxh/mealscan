@@ -612,6 +612,7 @@ function makeSheet(innerHtml){
   let closed=false;
   const close=()=>{
     if(closed)return; closed=true;
+    camStop();
     sheet.style.transition='transform .25s ease-in';sheet.style.transform='translateY(100%)';
     overlay.style.transition='background .25s';overlay.style.background='rgba(0,0,0,0)';
     setTimeout(()=>{overlay.remove();render();},240);
@@ -689,6 +690,7 @@ function openAdd(){
   const go=(fn)=>{sh.close();setTimeout(fn,200);};
 
   function renderFood(){
+    camStop();
     const recents=recentFoods(8);
     body.innerHTML=`
       <div class="add-search" id="af-search">${IC_SEARCH}<span>Search for a food…</span></div>
@@ -705,14 +707,53 @@ function openAdd(){
           <button class="recent-add" data-rl="${i}" aria-label="Re-log">${IC_PLUS}</button>
         </div>`).join('')}</div>`:''}`;
     body.querySelector('#af-search').onclick=()=>go(openSearch);
-    body.querySelector('#af-scan').onclick=()=>go(openPhoto);
+    body.querySelector('#af-scan').onclick=()=>renderScan();
     body.querySelector('#af-bar').onclick=()=>go(openBarcode);
     body.querySelector('#af-lib').onclick=()=>go(openLibrary);
     body.querySelector('#af-man').onclick=()=>go(openManual);
     body.querySelectorAll('[data-rl]').forEach(b=>b.onclick=()=>{relogFood(recents[+b.dataset.rl]);sh.close();});
   }
 
+  function renderScan(){
+    camStop();
+    if(!state.settings.apiKey){
+      body.innerHTML=`<div class="sub-head"><button class="circ-back" id="sc-back">${IC_BACK}</button><h3>Scan food</h3></div>
+        <div class="note">Add your Google Gemini API key in Settings to identify food from photos.</div>
+        <button class="btn btn-primary btn-block" id="sc-set" style="margin-top:12px">Open Settings</button>`;
+      body.querySelector('#sc-back').onclick=renderFood;
+      body.querySelector('#sc-set').onclick=()=>{sh.close();setTimeout(openSettings,200);};
+      return;
+    }
+    body.innerHTML=`
+      <div class="sub-head"><button class="circ-back" id="sc-back">${IC_BACK}</button><h3>Scan food</h3></div>
+      <div class="scan-frame" id="sc-frame"><video id="sc-video" playsinline muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:22px"></video><div class="corners"><span></span><span></span><span></span><span></span></div><div class="scan-line"></div><div class="scan-hint" id="sc-hint">Starting camera…</div></div>
+      <button class="btn btn-primary btn-block" id="sc-shot" style="margin-top:14px">Capture photo</button>
+      <button class="dashed-btn" id="sc-up">${IC_UPLOAD} Upload a photo instead</button>
+      <input type="file" accept="image/*" id="sc-file" style="display:none">
+      <div id="sc-stage"></div>`;
+    const video=body.querySelector('#sc-video'), hint=body.querySelector('#sc-hint'), file=body.querySelector('#sc-file');
+    body.querySelector('#sc-back').onclick=()=>{camStop();renderFood();};
+    let live=false;
+    camStart(video).then(ok=>{ live=ok; hint.textContent=ok?'Point your camera at your meal':'Camera unavailable — tap Capture to use your camera'; });
+    async function analyze(b64){
+      camStop();
+      body.innerHTML=`<div class="sub-head"><button class="circ-back" id="sc-b2">${IC_BACK}</button><h3>Review &amp; add</h3></div><div id="sc-stage"><div class="spinner">Analyzing photo…</div></div>`;
+      body.querySelector('#sc-b2').onclick=renderScan;
+      const stage=body.querySelector('#sc-stage');
+      try{
+        const result=await analyzePhoto(b64);
+        if(!result.items||!result.items.length){ stage.innerHTML=`<div class="err">No food detected. ${esc(result.assumptions||'')}</div><button class="btn btn-block" id="sc-rt" style="margin-top:10px">Try again</button>`; stage.querySelector('#sc-rt').onclick=renderScan; return; }
+        showConfirm(null,stage,result,()=>sh.close());
+      }catch(e){ stage.innerHTML=`<div class="err">${esc(e.message||'Request failed.')}</div><button class="btn btn-block" id="sc-rt" style="margin-top:10px">Try again</button>`; stage.querySelector('#sc-rt').onclick=renderScan; }
+    }
+    const nativeShot=()=>{ file.setAttribute('capture','environment'); file.click(); };
+    body.querySelector('#sc-shot').onclick=()=>{ if(live&&_camStream){ analyze(camCapture(video)); } else { nativeShot(); } };
+    body.querySelector('#sc-up').onclick=()=>{ file.removeAttribute('capture'); file.click(); };
+    file.onchange=async(ev)=>{ const f=ev.target.files[0]; if(!f)return; camStop(); try{ analyze(await toJpegBase64(f)); }catch(e){ body.querySelector('#sc-stage').innerHTML=`<div class="err">Could not read that image.</div>`; } };
+  }
+
   function renderExercise(){
+    camStop();
     const wkg=latestWeightKg();
     const acts=[...QUICK,...Object.keys(MET).filter(a=>!QUICK.includes(a))];
     let activity='Running',intensity='moderate',minutes=28;
@@ -880,6 +921,18 @@ async function toJpegBase64(file,maxDim=1100,q=0.8){
   c.getContext('2d').drawImage(img,0,0,c.width,c.height);
   return c.toDataURL('image/jpeg',q).split(',')[1];
 }
+let _camStream=null;
+async function camStart(v){
+  try{ _camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false}); v.srcObject=_camStream; await v.play(); return true; }
+  catch(e){ _camStream=null; return false; }
+}
+function camStop(){ if(_camStream){_camStream.getTracks().forEach(t=>t.stop());_camStream=null;} }
+function camCapture(v){
+  const w=v.videoWidth||1100,h=v.videoHeight||1100,sc=Math.min(1,1100/Math.max(w,h));
+  const c=document.createElement('canvas'); c.width=Math.round(w*sc); c.height=Math.round(h*sc);
+  c.getContext('2d').drawImage(v,0,0,c.width,c.height);
+  return c.toDataURL('image/jpeg',0.8).split(',')[1];
+}
 function openPhoto(){
   if(!state.settings.apiKey){
     const m=openModal('Scan a photo',`<div class="err">No API key set. Add your Google Gemini API key in Settings first.</div><div class="field"><button class="btn btn-primary btn-block" id="go-set">Open Settings</button></div>`);
@@ -967,7 +1020,7 @@ async function aiNutrition(name){
   text=text.replace(/```json|```/g,'').trim();const s=text.indexOf('{'),e=text.lastIndexOf('}');if(s>=0&&e>=0)text=text.slice(s,e+1);
   try{ return JSON.parse(text); }catch(err){ throw new Error('Could not read the AI response. Please try again.'); }
 }
-function showConfirm(m,stage,result){
+function showConfirm(m,stage,result,onDone){
   const items=result.items.map(it=>({
     name:it.name||'Item',
     per:{calories:+(it.per_100g?.calories||0),protein_g:+(it.per_100g?.protein_g||0),carbs_g:+(it.per_100g?.carbs_g||0),fat_g:+(it.per_100g?.fat_g||0),sugar_g:+(it.per_100g?.sugar_g||0)},
@@ -1003,7 +1056,7 @@ function showConfirm(m,stage,result){
           carbs_g:it.per.carbs_g*it.grams/100,fat_g:it.per.fat_g*it.grams/100,sugar_g:it.per.sugar_g*it.grams/100,source:'photo'});
         if(lib)addToLibrary(it.name,it.per,it.grams);
       });
-      save(); closeModal(m);
+      save(); onDone?onDone():closeModal(m);
     };
   }
   paint();
