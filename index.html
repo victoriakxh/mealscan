@@ -283,11 +283,10 @@
   .scan-line{position:absolute;left:26px;right:26px;top:48%;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);box-shadow:0 0 9px var(--accent);animation:scanmove 2.4s ease-in-out infinite;}
   @keyframes scanmove{0%,100%{transform:translateY(-58px)}50%{transform:translateY(58px)}}
   .scan-hint{position:relative;color:rgba(255,255,255,.92);font-size:13px;padding-bottom:18px;}
-  .bc-box{position:absolute;top:46%;left:50%;transform:translate(-50%,-50%);width:64%;height:92px;border:2px solid rgba(255,255,255,.55);border-radius:12px;}
-  .bc-line{position:absolute;top:46%;left:20%;right:20%;height:2px;background:#ff5a6a;box-shadow:0 0 8px #ff5a6a;}
-  #reader{position:absolute;inset:0;width:100%;height:100%;}
-  #reader video{width:100%!important;height:100%!important;object-fit:cover!important;display:block;}
-  #reader img,#reader__dashboard{display:none!important;}
+  #reader{width:100%;border-radius:18px;overflow:hidden;background:#16131b;min-height:180px;}
+  #reader video{width:100%!important;display:block;border-radius:18px;}
+  #reader img{display:none!important;}
+  .bc-hint{text-align:center;color:var(--text-soft);font-size:13px;margin-top:10px;}
   .dashed-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:14px;padding:14px;border-radius:15px;border:1.5px dashed var(--accent);background:var(--accent-bg);color:var(--accent-strong);font-family:var(--body);font-weight:600;font-size:14px;cursor:pointer;}
   .dashed-btn svg{width:18px;height:18px;}
   .found-card{display:flex;align-items:center;gap:12px;background:var(--accent-bg);border-radius:16px;padding:13px 14px;margin-top:14px;}
@@ -757,27 +756,38 @@ function openAdd(){
 
   function renderBarcode(){
     camStop();
-    let scanner=null;
-    const stopScanner=()=>{ if(scanner){try{scanner.stop().then(()=>{try{scanner.clear();}catch(_){}}).catch(()=>{});}catch(_){}scanner=null;} };
+    let scanner=null, running=false;
+    const stopScanner=()=>{ if(scanner&&running){ running=false; try{ return scanner.stop().then(()=>{try{scanner.clear();}catch(_){}}).catch(()=>{}); }catch(_){} } return Promise.resolve(); };
     body.innerHTML=`
       <div class="sub-head"><button class="circ-back" id="bc-back">${IC_BACK}</button><h3>Scan a barcode</h3></div>
-      <div class="scan-frame" id="bc-view" style="aspect-ratio:auto;height:210px"><div id="reader"></div><div class="bc-box"></div><div class="bc-line"></div><div class="scan-hint">Align the barcode within the frame</div></div>
-      <div class="field" style="margin-top:12px"><input type="number" inputmode="numeric" id="bc-num" placeholder="…or type the barcode number"></div>
-      <div class="btn-row"><button class="btn" id="bc-scan">Scan with camera</button><button class="btn btn-primary" id="bc-look">Look up</button></div>
+      <div id="reader"></div>
+      <div class="bc-hint" id="bc-hint">Point your camera at a product barcode</div>
+      <div class="field" style="margin-top:10px"><input type="number" inputmode="numeric" id="bc-num" placeholder="…or type the barcode number"></div>
+      <div class="btn-row"><button class="btn" id="bc-scan">Restart camera</button><button class="btn btn-primary" id="bc-look">Look up</button></div>
       <div id="bc-stage"></div>`;
-    const stage=body.querySelector('#bc-stage');
+    const stage=body.querySelector('#bc-stage'), hint=body.querySelector('#bc-hint');
     body.querySelector('#bc-back').onclick=()=>{stopScanner();renderFood();};
+    const onDetect=(txt)=>{ if(!running)return; stopScanner(); body.querySelector('#bc-num').value=txt; doLookup(txt); };
     const startScan=async()=>{
-      if(typeof Html5Qrcode==='undefined'){stage.innerHTML=`<div class="hint">Camera scanning unavailable here — type the barcode number instead.</div>`;return;}
-      try{ scanner=new Html5Qrcode('reader'); await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:230,height:130}},(txt)=>{stopScanner();body.querySelector('#bc-num').value=txt;doLookup(txt);},()=>{}); }
-      catch(e){ stage.innerHTML=`<div class="hint">Could not start the camera — type the barcode number instead.</div>`; }
+      if(typeof Html5Qrcode==='undefined'){ hint.textContent='Camera scanning isn’t available here — type the barcode number instead.'; return; }
+      await stopScanner();
+      const opts={};
+      if(typeof Html5QrcodeSupportedFormats!=='undefined'){
+        opts.formatsToSupport=[Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.UPC_E,Html5QrcodeSupportedFormats.CODE_128,Html5QrcodeSupportedFormats.CODE_39,Html5QrcodeSupportedFormats.ITF,Html5QrcodeSupportedFormats.QR_CODE];
+      }
+      try{
+        scanner=new Html5Qrcode('reader',opts); running=true;
+        hint.textContent='Point your camera at a product barcode';
+        await scanner.start({facingMode:'environment'},
+          {fps:10, qrbox:(w,h)=>{const bw=Math.min(w-20,300);return {width:bw,height:Math.max(110,Math.round(bw*0.55))};}, aspectRatio:1.3333, experimentalFeatures:{useBarCodeDetectorIfSupported:true}},
+          onDetect, ()=>{});
+      }catch(e){ running=false; hint.textContent='Couldn’t start the camera — type the barcode number instead.'; }
     };
     body.querySelector('#bc-scan').onclick=startScan;
-    body.querySelector('#bc-view').onclick=startScan;
     body.querySelector('#bc-look').onclick=()=>doLookup(body.querySelector('#bc-num').value.trim());
     async function doLookup(code){
       if(!code){stage.innerHTML=`<div class="err">Enter a barcode number.</div>`;return;}
-      stopScanner();
+      await stopScanner();
       stage.innerHTML=`<div class="spinner">${ONDB?'Looking up product…':'Loading food database (first time only, ~10 MB)…'}</div>`;
       try{ await ensureONDB(); const hit=ONBYEAN&&ONBYEAN.get(String(code)); if(hit){ result(hit[0],{calories:hit[1],protein_g:hit[2],carbs_g:hit[3],fat_g:hit[4],sugar_g:hit[5]},'opennutrition',hit[6]); return; } }catch(e){}
       stage.innerHTML=`<div class="spinner">Looking up product…</div>`;
@@ -794,6 +804,7 @@ function openAdd(){
       body.querySelector('#bc-b2').onclick=renderBarcode;
       weighAndLog(null,body.querySelector('#bc-stage2'),name,per,source,g,()=>sh.close());
     }
+    startScan();
   }
 
   function renderLibrary(){
@@ -1203,28 +1214,32 @@ function logServing(m,stage,name,calories,portion,source,onDone){
 /* ---------- BARCODE ---------- */
 function openBarcode(){
   const m=openModal('Scan a barcode',`
-    <div class="scan-frame" id="bc-view" style="aspect-ratio:auto;height:200px"><div id="reader" style="position:absolute;inset:0"></div><div class="bc-box"></div><div class="bc-line"></div><div class="scan-hint">Align the barcode within the frame</div></div>
-    <div class="field" style="margin-top:12px"><input type="number" inputmode="numeric" id="bc-num" placeholder="…or type the barcode number"></div>
-    <div class="btn-row"><button class="btn" id="bc-scan">Scan with camera</button><button class="btn btn-primary" id="bc-look">Look up</button></div>
+    <div id="reader"></div>
+    <div class="bc-hint">Point your camera at a product barcode</div>
+    <div class="field" style="margin-top:10px"><input type="number" inputmode="numeric" id="bc-num" placeholder="…or type the barcode number"></div>
+    <div class="btn-row"><button class="btn" id="bc-scan">Restart camera</button><button class="btn btn-primary" id="bc-look">Look up</button></div>
     <div id="bc-stage"></div>
   `);
   const stage=m.querySelector('#bc-stage');
-  let scanner=null;
+  let scanner=null, running=false;
+  const stopScanner=()=>{ if(scanner&&running){running=false;try{return scanner.stop().then(()=>{try{scanner.clear();}catch(_){}}).catch(()=>{});}catch(_){}} return Promise.resolve(); };
   m.querySelector('#bc-look').onclick=()=>doLookup(m.querySelector('#bc-num').value.trim());
   const startScan=async()=>{
     if(typeof Html5Qrcode==='undefined'){stage.innerHTML=`<div class="hint">Camera scanning unavailable here — type the barcode number instead.</div>`;return;}
+    await stopScanner();
+    const opts={};
+    if(typeof Html5QrcodeSupportedFormats!=='undefined'){opts.formatsToSupport=[Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.UPC_E,Html5QrcodeSupportedFormats.CODE_128,Html5QrcodeSupportedFormats.CODE_39,Html5QrcodeSupportedFormats.ITF,Html5QrcodeSupportedFormats.QR_CODE];}
     try{
-      scanner=new Html5Qrcode('reader');
-      await scanner.start({facingMode:'environment'},{fps:10,qrbox:{width:230,height:130}},
-        (txt)=>{m.querySelector('#bc-num').value=txt;scanner.stop().then(()=>scanner.clear());doLookup(txt);},
-        ()=>{});
-    }catch(e){stage.innerHTML=`<div class="hint">Could not start the camera — type the barcode number instead.</div>`;}
+      scanner=new Html5Qrcode('reader',opts); running=true;
+      await scanner.start({facingMode:'environment'},
+        {fps:10,qrbox:(w,h)=>{const bw=Math.min(w-20,300);return {width:bw,height:Math.max(110,Math.round(bw*0.55))};},aspectRatio:1.3333,experimentalFeatures:{useBarCodeDetectorIfSupported:true}},
+        (txt)=>{ if(!running)return; stopScanner(); m.querySelector('#bc-num').value=txt; doLookup(txt); },()=>{});
+    }catch(e){running=false;stage.innerHTML=`<div class="hint">Could not start the camera — type the barcode number instead.</div>`;}
   };
   m.querySelector('#bc-scan').onclick=startScan;
-  m.querySelector('#bc-view').onclick=startScan;
   async function doLookup(code){
     if(!code){stage.innerHTML=`<div class="err">Enter a barcode number.</div>`;return;}
-    if(scanner){try{await scanner.stop();scanner.clear();}catch(_){}}
+    await stopScanner();
     m.querySelector('#reader').innerHTML='';
     stage.innerHTML=`<div class="spinner">${ONDB?'Looking up product…':'Loading food database (first time only, ~10 MB)…'}</div>`;
     // 1) offline: OpenNutrition cached database (313k barcodes)
