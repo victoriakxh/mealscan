@@ -1067,14 +1067,17 @@ async function barcodeLookup(code){
   }catch(e){}
   return null;
 }
-/* Open Food Facts text search via Search-a-licious (the legacy /cgi/search.pl is 503).
+/* Open Food Facts text search.
+   Uses the legacy /cgi/search.pl on world.openfoodfacts.org because it allows
+   cross-origin browser requests. The newer search.openfoodfacts.org (Search-a-licious)
+   does NOT send CORS headers, so a browser fetch to it fails with "Load failed".
    On-demand only — OFF rate-limits search to ~10/min and asks apps not to search-as-you-type. */
 async function offTextSearch(term){
-  const url=`https://search.openfoodfacts.org/search?q=${encodeURIComponent(term)}&page_size=20&fields=code,product_name,brands,nutriments`;
-  const r=await fetch(url,{headers:{'Accept':'application/json'}});
+  const url=`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}&search_simple=1&action=process&json=1&page_size=20&fields=code,product_name,brands,nutriments`;
+  const r=await fetch(url);
   if(!r.ok) throw new Error('Open Food Facts search is unavailable right now ('+r.status+'). Try again shortly, scan the barcode, or estimate with AI.');
   const data=await r.json();
-  const list=data.hits||data.products||[];
+  const list=data.products||[];
   return list.map(p=>{
     const n=p.nutriments||{}; const kcal=n['energy-kcal_100g'];
     if(!p.product_name || kcal==null) return null;
