@@ -171,8 +171,21 @@
   .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;}
   .chip{border:1.5px solid var(--divider);padding:9px 16px;font-size:14px;font-weight:600;background:var(--surface);border-radius:999px;color:var(--text);}
   .chip.sel{background:var(--accent);border-color:var(--accent);color:#fff;}
-  .item-edit{padding:6px 0 10px;}
+  .item-edit{padding:12px 0;border-bottom:1px solid var(--divider);}
   .item-edit .nm{font-weight:700;margin-bottom:8px;}
+  .ie-head{display:flex;gap:8px;align-items:center;}
+  .ie-head .ie-name{flex:1;min-width:0;padding:10px 12px;font-weight:700;}
+  .ie-del{flex:0 0 auto;width:38px;height:38px;display:inline-flex;align-items:center;justify-content:center;border:1.5px solid var(--divider);border-radius:50%;background:var(--surface);color:var(--text-soft);padding:0;}
+  .ie-del svg{width:18px;height:18px;}
+  .ie-del:active{color:var(--danger);border-color:var(--danger);}
+  .ie-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;}
+  .ie-per{font-size:13px;color:var(--text-soft);}
+  .conf-tag{font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;padding:3px 8px;border-radius:999px;background:#FBE9C8;color:#9A6B17;}
+  .ie-reest{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--accent-strong);background:var(--accent-bg);border:1.5px solid var(--accent);border-radius:999px;padding:7px 13px;}
+  .ie-reest svg{width:15px;height:15px;}
+  .ie-reest[disabled]{opacity:.6;}
+  .ie-rowerr{font-size:13px;color:var(--danger);font-weight:600;margin-top:8px;}
+  .add-missing{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:14px;padding:12px;border:1.5px dashed var(--accent);border-radius:var(--radius-sm);background:none;color:var(--accent-strong);font-weight:700;font-size:14px;}
   .spinner{padding:40px 0;text-align:center;color:var(--text-soft);}
   .menu-item{padding:18px;margin-top:11px;background:var(--surface);border-radius:var(--radius-sm);box-shadow:0 3px 14px rgba(43,42,38,.05);font-weight:700;}
   .menu-item:active{filter:brightness(.97);}
@@ -663,6 +676,8 @@ const IC_HIKE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke
 const IC_BOLT='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L5 14h6l-1 7 8-11h-6z"/></svg>';
 const IC_HEART='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.5-7-10a4 4 0 017-2.5A4 4 0 0119 10c0 5.5-7 10-7 10z"/></svg>';
 const IC_BACK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>';
+const IC_TRASH='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/></svg>';
+const IC_REFRESH='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 4v5h-5"/></svg>';
 const IC_CHECK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg>';
 const IC_UPLOAD='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg>';
 const ACTS={
@@ -1210,37 +1225,86 @@ function showConfirm(m,stage,result,onDone){
   const items=result.items.map(it=>({
     name:it.name||'Item',
     per:{calories:+(it.per_100g?.calories||0),protein_g:+(it.per_100g?.protein_g||0),carbs_g:+(it.per_100g?.carbs_g||0),fat_g:+(it.per_100g?.fat_g||0),sugar_g:+(it.per_100g?.sugar_g||0)},
-    grams:+(it.estimated_grams||100)
+    grams:+(it.estimated_grams||100),
+    conf:(it.confidence||'').toLowerCase(),
+    estName:it.name||'Item'   // name the current nutrition was estimated for
   }));
   function rowHtml(it,i){
     const cal=r0(it.per.calories*it.grams/100);
-    return `<div class="item-edit">
-      <div class="nm">${esc(it.name)} <span style="color:var(--text-soft);font-weight:400">· ${r0(it.per.calories)} kcal/100g</span></div>
-      <div class="field-row">
+    const dirty=it.name.trim() && it.name.trim()!==it.estName;
+    const lowTag=it.conf==='low'?`<span class="conf-tag">Low confidence</span>`:'';
+    return `<div class="item-edit" data-row="${i}">
+      <div class="ie-head">
+        <input class="ie-name" data-n="${i}" value="${esc(it.name)}" placeholder="Food name" autocomplete="off">
+        <button class="ie-del" data-del="${i}" aria-label="Remove item">${IC_TRASH}</button>
+      </div>
+      <div class="ie-meta">
+        <span class="ie-per">${r0(it.per.calories)} kcal/100g</span>
+        ${lowTag}
+        <button class="ie-reest" data-reest="${i}" style="${dirty?'':'display:none'}">${IC_REFRESH}Re-estimate</button>
+      </div>
+      <div class="field-row" style="margin-top:10px">
         <div class="field"><label>Weight (g)</label><input type="number" inputmode="decimal" data-g="${i}" value="${it.grams}"></div>
         <div class="field"><label>Calories</label><input type="text" data-c="${i}" value="${cal}" disabled></div>
       </div>
+      <div class="ie-rowerr" data-err="${i}" style="display:none"></div>
     </div>`;
   }
   function paint(){
+    const named=items.filter(it=>it.name.trim());
     stage.innerHTML=`
       ${result.assumptions?`<div class="note">${esc(result.assumptions)}</div>`:''}
-      ${items.map(rowHtml).join('')}
+      ${items.length?items.map(rowHtml).join(''):'<div class="empty" style="border:none">No items left. Add one below or go back to rescan.</div>'}
+      <button class="add-missing" id="add-missing">+ Add an item the AI missed</button>
       ${mealChips(defaultMeal())}
       <div class="toggle-row"><input type="checkbox" id="savelib" style="width:auto"><label for="savelib" style="margin:0">Save these to library</label></div>
-      <div class="field"><button class="btn btn-primary btn-block" id="confirm-save">Log ${items.length} item${items.length>1?'s':''}</button></div>`;
+      <div class="field"><button class="btn btn-primary btn-block" id="confirm-save"${named.length?'':' disabled'}>Log ${named.length} item${named.length===1?'':'s'}</button></div>`;
     const getMeal=wireMealChips(stage);
+
+    // weight -> recompute calories live
     stage.querySelectorAll('[data-g]').forEach(inp=>inp.oninput=()=>{
       const i=+inp.dataset.g; items[i].grams=+inp.value||0;
       stage.querySelector(`[data-c="${i}"]`).value=r0(items[i].per.calories*items[i].grams/100);
     });
+    // name edits -> update model + toggle this row's Re-estimate button (no repaint, keeps focus)
+    stage.querySelectorAll('[data-n]').forEach(inp=>inp.oninput=()=>{
+      const i=+inp.dataset.n; items[i].name=inp.value;
+      const btn=stage.querySelector(`[data-reest="${i}"]`);
+      const dirty=inp.value.trim() && inp.value.trim()!==items[i].estName;
+      if(btn)btn.style.display=dirty?'':'none';
+    });
+    // delete
+    stage.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{ items.splice(+b.dataset.del,1); paint(); });
+    // re-estimate (text-only, keeps grams)
+    stage.querySelectorAll('[data-reest]').forEach(b=>b.onclick=async()=>{
+      const i=+b.dataset.reest; const name=items[i].name.trim(); if(!name)return;
+      const errEl=stage.querySelector(`[data-err="${i}"]`);
+      if(!state.settings.apiKey){ errEl.style.display='';errEl.textContent='Add your Gemini API key in Settings to re-estimate.';return; }
+      errEl.style.display='none'; b.disabled=true; const html=b.innerHTML; b.innerHTML=`${IC_REFRESH}Estimating…`;
+      try{
+        const ai=await aiNutrition(name);
+        if(!ai||!ai.per_100g||!(+ai.per_100g.calories)){ throw new Error('Couldn’t estimate that. Try a clearer name.'); }
+        items[i].per={calories:+ai.per_100g.calories||0,protein_g:+ai.per_100g.protein_g||0,carbs_g:+ai.per_100g.carbs_g||0,fat_g:+ai.per_100g.fat_g||0,sugar_g:+ai.per_100g.sugar_g||0};
+        items[i].name=ai.name||name; items[i].estName=items[i].name; items[i].conf='';  // user-corrected: clear low flag
+        paint();
+      }catch(e){ b.disabled=false; b.innerHTML=html; errEl.style.display='';errEl.textContent=e.message||'Re-estimate failed.'; }
+    });
+    // add a blank row to fill in + estimate
+    stage.querySelector('#add-missing').onclick=()=>{
+      items.push({name:'',per:{calories:0,protein_g:0,carbs_g:0,fat_g:0,sugar_g:0},grams:100,conf:'',estName:''});
+      paint();
+      const inputs=stage.querySelectorAll('[data-n]'); const last=inputs[inputs.length-1]; if(last)last.focus();
+    };
+    // save (only rows with a name)
     stage.querySelector('#confirm-save').onclick=()=>{
       const lib=stage.querySelector('#savelib').checked; const meal=getMeal();
-      items.forEach(it=>{
-        state.entries.push({id:uid(),date:viewDate,meal,name:it.name,grams:it.grams,
+      const toLog=items.filter(it=>it.name.trim());
+      if(!toLog.length)return;
+      toLog.forEach(it=>{
+        state.entries.push({id:uid(),date:viewDate,meal,name:it.name.trim(),grams:it.grams,
           calories:it.per.calories*it.grams/100,protein_g:it.per.protein_g*it.grams/100,
           carbs_g:it.per.carbs_g*it.grams/100,fat_g:it.per.fat_g*it.grams/100,sugar_g:it.per.sugar_g*it.grams/100,source:'photo'});
-        if(lib)addToLibrary(it.name,it.per,it.grams);
+        if(lib)addToLibrary(it.name.trim(),it.per,it.grams);
       });
       save(); onDone?onDone():closeModal(m);
     };
