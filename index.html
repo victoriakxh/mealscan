@@ -444,7 +444,7 @@ function shiftDay(key,delta){const a=key.split('-').map(Number);const d=new Date
 function dayLabel(key){if(key===todayKey())return 'Today';if(key===shiftDay(todayKey(),-1))return 'Yesterday';return new Date(key+'T00:00:00').toLocaleDateString(undefined,{weekday:'short',day:'numeric',month:'long'});}
 function mealChips(sel){return `<div class="field"><label>Meal</label><div class="chips mealchips">${MEALS.map(x=>`<button class="chip${x===sel?' sel':''}" data-meal="${x}">${x}</button>`).join('')}</div></div>`;}
 function wireMealChips(root){const box=root.querySelector('.mealchips');let cur=box.querySelector('.chip.sel')?box.querySelector('.chip.sel').dataset.meal:MEALS[0];box.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{cur=c.dataset.meal;box.querySelectorAll('.chip').forEach(x=>x.classList.toggle('sel',x===c));});return ()=>cur;}
-const UNITS=[{u:'gram',g:1},{u:'tsp',g:5},{u:'tbsp',g:15},{u:'cup',g:240},{u:'bowl',g:250},{u:'plate',g:300},{u:'piece',g:50},{u:'slice',g:30},{u:'serving',g:100}];
+const UNITS=[{u:'gram',g:1},{u:'ml',g:1},{u:'tsp',g:5},{u:'tbsp',g:15},{u:'cup',g:240},{u:'bowl',g:250},{u:'plate',g:300},{u:'piece',g:50},{u:'slice',g:30},{u:'serving',g:100}];
 function servingWidget(){
   return `<div class="field"><label>Serving size</label>
     <select id="sv-unit">${UNITS.map(x=>`<option value="${x.u}">${x.u}</option>`).join('')}</select></div>
@@ -457,16 +457,17 @@ function servingWidget(){
 function wireServing(root,per,initGrams){
   const unitSel=root.querySelector('#sv-unit'),qty=root.querySelector('#sv-qty'),gpu=root.querySelector('#sv-gpu'),gpuWrap=root.querySelector('#sv-gpu-wrap'),total=root.querySelector('#sv-total');
   function grams(){return (+qty.value||0)*(+gpu.value||0);}
-  function recompute(){const g=grams();total.textContent=`= ${r1(g)} g${per?` · ${r0(per.calories*g/100)} kcal`:''}`;}
+  function recompute(){const g=grams();const u=unitSel.value;const wl=(u==='ml')?`${r1(g)} ml`:`${r1(g)} g`;total.textContent=`= ${wl}${per?` · ${r0(per.calories*g/100)} kcal`:''}`;}
   function syncUnit(){
-    if(unitSel.value==='gram'){gpuWrap.style.display='none';gpu.value=1;qty.value=100;}
-    else{const d=UNITS.find(x=>x.u===unitSel.value);gpuWrap.style.display='';gpu.value=d.g;qty.value=1;}
+    const u=unitSel.value;
+    if(u==='gram'||u==='ml'){gpuWrap.style.display='none';gpu.value=1;qty.value=100;}
+    else{const d=UNITS.find(x=>x.u===u);gpuWrap.style.display='';gpu.value=d.g;qty.value=1;}
     recompute();
   }
   unitSel.onchange=syncUnit;qty.oninput=recompute;gpu.oninput=recompute;
   if(initGrams){unitSel.value='gram';gpuWrap.style.display='none';gpu.value=1;qty.value=r1(initGrams);}
   recompute();
-  return {grams,desc:()=>{const u=unitSel.value,q=+qty.value||0;return u==='gram'?`${r1(grams())} g`:`${q} ${u} (${r1(grams())} g)`;}};
+  return {grams,desc:()=>{const u=unitSel.value,q=+qty.value||0;return (u==='gram')?`${r1(grams())} g`:(u==='ml')?`${r1(grams())} ml`:`${q} ${u} (${r1(grams())} g)`;}};
 }
 
 /* ---------- helpers ---------- */
@@ -834,8 +835,13 @@ function openAdd(){
         try{
           const items=await offTextSearch(term);
           if(!items.length){ box.innerHTML=`<div class="empty" style="border:none">No Open Food Facts matches for “${esc(term)}”.</div>`; offBtn.disabled=false; offBtn.textContent='Search again'; return; }
-          box.innerHTML=items.map((it,i)=>rowHtml(it.name,`${it.brands?esc(it.brands)+' · ':''}${r0(it.per.calories)} kcal/100g · Open Food Facts`,`data-off="${i}"`)).join('');
-          box.querySelectorAll('[data-off]').forEach(n=>n.onclick=()=>{const it=items[+n.dataset.off];addItemView(st=>weighAndLog(null,st,it.name,it.per,'packaged',null,()=>sh.close()));});
+          box.innerHTML=items.map((it,i)=>{
+            const sub=it.grams
+              ? `${it.brands?esc(it.brands)+' · ':''}${r0(it.grams)} g · ${r0(it.per.calories*it.grams/100)} kcal · Open Food Facts`
+              : `${it.brands?esc(it.brands)+' · ':''}${r0(it.per.calories)} kcal/100g · Open Food Facts`;
+            return rowHtml(it.name,sub,`data-off="${i}"`);
+          }).join('');
+          box.querySelectorAll('[data-off]').forEach(n=>n.onclick=()=>{const it=items[+n.dataset.off];addItemView(st=>weighAndLog(null,st,it.name,it.per,'packaged',it.grams||null,()=>sh.close()));});
           offBtn.disabled=false; offBtn.textContent='Search Open Food Facts again';
         }catch(e){ box.innerHTML=`<div class="err">${esc(e.message||'Open Food Facts search failed.')}</div>`; offBtn.disabled=false; }
       };
@@ -969,20 +975,21 @@ function openAdd(){
     const perG=()=>(+amtEl.value||0)*unitG();
     function updEst(){
       const ps=perG(), qty=+qtyEl.value||1, tot=ps*qty;
-      estEl.textContent = unitEl.value==='gram'
-        ? (qty>1?`Logging ${r0(ps)} g × ${r1(qty)} = ${r0(tot)} g`:`Logging ${r0(ps)} g`)
+      const isWt=unitEl.value==='gram'||unitEl.value==='ml', lbl=unitEl.value==='ml'?'ml':'g';
+      estEl.textContent = isWt
+        ? (qty>1?`Logging ${r0(ps)} ${lbl} × ${r1(qty)} = ${r0(tot)} ${lbl}`:`Logging ${r0(ps)} ${lbl}`)
         : `Each serving ≈ ${r0(ps)} g${qty>1?` · total ≈ ${r0(tot)} g`:''}`;
     }
     amtEl.oninput=updEst; qtyEl.oninput=updEst;
-    unitEl.onchange=()=>{ amtEl.value = unitEl.value==='gram' ? 100 : 1; updEst(); };
+    unitEl.onchange=()=>{ amtEl.value = (unitEl.value==='gram'||unitEl.value==='ml') ? 100 : 1; updEst(); };
     updEst();
     body.querySelector('#mn-save').onclick=()=>{
       const name=body.querySelector('#mn-name').value.trim()||'Item';
       const amt=+amtEl.value||0, unit=unitEl.value, qty=+qtyEl.value||1, ps=perG(), grams=ps*qty;
       const cal=+body.querySelector('#mn-cal').value||0, p=+body.querySelector('#mn-p').value||0, c=+body.querySelector('#mn-c').value||0, f=+body.querySelector('#mn-f').value||0;
-      let perLabel = unit==='gram' ? `${r0(ps)} g` : `${r1(amt)} ${unit}`;
+      let perLabel = unit==='gram' ? `${r0(ps)} g` : unit==='ml' ? `${r0(ps)} ml` : `${r1(amt)} ${unit}`;
       let servingLabel = qty>1 ? `${r1(qty)} × ${perLabel}` : perLabel;
-      if(unit!=='gram') servingLabel += ` (≈ ${r0(grams)} g)`;
+      if(unit!=='gram' && unit!=='ml') servingLabel += ` (≈ ${r0(grams)} g)`;
       state.entries.push({id:uid(),date:viewDate,meal,name,grams,servingLabel,calories:cal*qty,protein_g:p*qty,carbs_g:c*qty,fat_g:f*qty,sugar_g:0,source:'manual'});
       if(body.querySelector('#mn-lib').checked && ps>0) addToLibrary(name,{calories:cal*100/ps,protein_g:p*100/ps,carbs_g:c*100/ps,fat_g:f*100/ps,sugar_g:0},ps);
       save();sh.close();
@@ -1073,7 +1080,7 @@ async function barcodeLookup(code){
    does NOT send CORS headers, so a browser fetch to it fails with "Load failed".
    On-demand only — OFF rate-limits search to ~10/min and asks apps not to search-as-you-type. */
 async function offTextSearch(term){
-  const url=`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}&search_simple=1&action=process&json=1&page_size=20&fields=code,product_name,brands,nutriments`;
+  const url=`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(term)}&search_simple=1&action=process&json=1&page_size=20&fields=code,product_name,brands,quantity,product_quantity,nutriments`;
   const r=await fetch(url);
   if(!r.ok) throw new Error('Open Food Facts search is unavailable right now ('+r.status+'). Try again shortly, scan the barcode, or estimate with AI.');
   const data=await r.json();
@@ -1081,7 +1088,9 @@ async function offTextSearch(term){
   return list.map(p=>{
     const n=p.nutriments||{}; const kcal=n['energy-kcal_100g'];
     if(!p.product_name || kcal==null) return null;
-    return {name:p.product_name, brands:p.brands||'', per:{
+    const pq=parseFloat(p.product_quantity);                 // net package weight in grams (or ml)
+    const grams=(isFinite(pq) && pq>0 && pq<=10000) ? pq : null;
+    return {name:p.product_name, brands:p.brands||'', quantity:p.quantity||'', grams, per:{
       calories:+kcal||0, protein_g:+(n['proteins_100g']||0), carbs_g:+(n['carbohydrates_100g']||0),
       fat_g:+(n['fat_100g']||0), sugar_g:+(n['sugars_100g']||0)}};
   }).filter(Boolean);
