@@ -480,10 +480,16 @@ function r0(n){return Math.round(n||0);}
 function r1(n){return Math.round((n||0)*10)/10;}
 function uid(){return Math.random().toString(36).slice(2,9);}
 function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+const KG_PER_LB=0.45359237, CM_PER_IN=2.54;
+function kgToUnit(kg,u){return u==='lb'?kg/KG_PER_LB:kg;}
+function unitToKg(v,u){return u==='lb'?v*KG_PER_LB:v;}
+function cmToUnit(cm,u){return u==='in'?cm/CM_PER_IN:cm;}
+function unitToCm(v,u){return u==='in'?v*CM_PER_IN:v;}
+function weightDisp(w,u){return kgToUnit(unitToKg(w.weight,w.unit||'kg'),u);}  // a weigh-in -> current display unit
 function latestWeightKg(){
   if(!state.weights.length)return null;
   const w=[...state.weights].sort((a,b)=>a.date<b.date?1:-1)[0];
-  return w.unit==='lb'?w.weight/2.2046:w.weight;
+  return unitToKg(w.weight, w.unit||'kg');
 }
 function todayFood(){return state.entries.filter(e=>e.date===viewDate);}
 function todayEx(){return state.exercise.filter(e=>e.date===viewDate);}
@@ -1661,7 +1667,7 @@ function renderWeight(){
   const list=$('w-list');
   if(!sorted.length){list.innerHTML=`<div class="empty">No weigh-ins yet.</div>`;}
   else list.innerHTML=[...sorted].reverse().map(w=>`
-    <div class="row"><div><div class="name">${r1(w.weight)} ${w.unit}</div>
+    <div class="row"><div><div class="name">${r1(weightDisp(w,unit))} ${unit}</div>
       <div class="sub">${new Date(w.date).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})}</div></div>
       <button class="linkbtn" data-delw="${w.date}">Delete</button></div>`).join('');
   list.querySelectorAll('[data-delw]').forEach(b=>b.onclick=()=>{state.weights=state.weights.filter(w=>w.date!==b.dataset.delw);save();renderWeight();});
@@ -1679,6 +1685,7 @@ function drawChartArea(){
   area.querySelector('#trend').onchange=(e)=>{showTrend=e.target.checked;drawChartArea();};
 }
 function chartSVG(){
+  const cu=state.settings.weightUnit||'kg';
   const all=[...state.weights].sort((a,b)=>a.date<b.date?-1:1);
   if(all.length<1)return `<div class="empty" style="border:none">Log a few mornings to see your trend.</div>`;
   const cutoff=chartRange>=9999?'0000':new Date(Date.now()-chartRange*864e5).toISOString().slice(0,10);
@@ -1686,7 +1693,7 @@ function chartSVG(){
   if(pts.length<2)return `<div class="empty" style="border:none">Need at least two weigh-ins in this range.</div>`;
   const W=520,H=240,padL=38,padR=10,padT=14,padB=26;
   const xs=pts.map(p=>new Date(p.date).getTime());
-  const ys=pts.map(p=>p.weight);
+  const ys=pts.map(p=>weightDisp(p,cu));
   const minX=Math.min(...xs),maxX=Math.max(...xs);
   let minY=Math.min(...ys),maxY=Math.max(...ys);
   const pad=(maxY-minY)*0.15||1;minY-=pad;maxY+=pad;
@@ -1702,11 +1709,11 @@ function chartSVG(){
   if(showTrend){
     const tp=pts.map((p,i)=>{const d0=new Date(p.date).getTime();
       const win=pts.filter(q=>{const d=new Date(q.date).getTime();return d<=d0&&d>d0-7*864e5;});
-      const avg=win.reduce((s,q)=>s+q.weight,0)/win.length;return [X(d0),Y(avg)];});
+      const avg=win.reduce((s,q)=>s+weightDisp(q,cu),0)/win.length;return [X(d0),Y(avg)];});
     trendPath=`<polyline fill="none" stroke="var(--accent)" stroke-opacity="0.4" stroke-width="3" points="${tp.map(p=>p.join(',')).join(' ')}"/>`;
   }
-  const line=pts.map(p=>`${X(new Date(p.date).getTime())},${Y(p.weight)}`).join(' ');
-  const dots=pts.map(p=>{const x=X(new Date(p.date).getTime()),y=Y(p.weight);return `<rect x="${x-2.5}" y="${y-2.5}" width="5" height="5" fill="var(--accent)"/>`;}).join('');
+  const line=pts.map(p=>`${X(new Date(p.date).getTime())},${Y(weightDisp(p,cu))}`).join(' ');
+  const dots=pts.map(p=>{const x=X(new Date(p.date).getTime()),y=Y(weightDisp(p,cu));return `<rect x="${x-2.5}" y="${y-2.5}" width="5" height="5" fill="var(--accent)"/>`;}).join('');
   const first=new Date(pts[0].date).toLocaleDateString(undefined,{day:'numeric',month:'short'});
   const last=new Date(pts[pts.length-1].date).toLocaleDateString(undefined,{day:'numeric',month:'short'});
   return `<svg class="chart" viewBox="0 0 ${W} ${H}">
@@ -1722,6 +1729,7 @@ function chartSVG(){
 /* ---------- PLAN ---------- */
 function renderPlan(){
   const p=state.profile;const wkg=latestWeightKg();
+  const hu=state.settings.heightUnit||'cm', wu=state.settings.weightUnit||'kg';
   $('main').innerHTML=`
     <div class="topbar"><div><h1>Plan</h1><div class="date">Daily calorie target</div></div><button class="gear" id="open-settings-p">${GEAR_SVG}</button></div>
     <div class="field"><label>Sex</label>
@@ -1731,9 +1739,9 @@ function renderPlan(){
       </div></div>
     <div class="field-row">
       <div class="field"><label>Age</label><input type="number" inputmode="numeric" id="p-age" value="${p.age||''}"></div>
-      <div class="field"><label>Height (cm)</label><input type="number" inputmode="decimal" id="p-ht" value="${p.height||''}"></div>
+      <div class="field"><label>Height (${hu})</label><input type="number" inputmode="decimal" id="p-ht" value="${p.height?r1(cmToUnit(p.height,hu)):''}"></div>
     </div>
-    <div class="field"><label>Current weight (kg)</label><input type="number" inputmode="decimal" id="p-wt" value="${wkg?r1(wkg):''}" placeholder="${wkg?'':'log weight or type it'}"></div>
+    <div class="field"><label>Current weight (${wu})</label><input type="number" inputmode="decimal" id="p-wt" value="${wkg?r1(kgToUnit(wkg,wu)):''}" placeholder="${wkg?'':'log weight or type it'}"></div>
     <div class="field"><label>Activity (baseline, not counting workouts)</label>
       <select id="p-act">
         <option value="1.2">Sedentary — little/no exercise</option>
@@ -1761,7 +1769,7 @@ function renderPlan(){
   let sex=p.sex,goal=p.goal,rate=p.lossRate;
   const sync=()=>{
     p.sex=sex;p.goal=goal;p.lossRate=rate;
-    p.age=+$('p-age').value||'';p.height=+$('p-ht').value||'';p.activity=+$('p-act').value;
+    p.age=+$('p-age').value||'';p.height=$('p-ht').value?r1(unitToCm(+$('p-ht').value,hu)):'';p.activity=+$('p-act').value;
     save();compute();
   };
   $('open-settings-p').onclick=openSettings;
@@ -1770,9 +1778,10 @@ function renderPlan(){
   document.querySelectorAll('#p-rate .chip').forEach(c=>c.onclick=()=>{rate=+c.dataset.rate;document.querySelectorAll('#p-rate .chip').forEach(x=>x.classList.toggle('sel',x===c));sync();});
   ['p-age','p-ht','p-wt','p-act'].forEach(id=>$(id).oninput=sync);
   function compute(){
-    const age=+$('p-age').value,ht=+$('p-ht').value,wt=+$('p-wt').value,act=+$('p-act').value;
+    const age=+$('p-age').value,htRaw=+$('p-ht').value,wtRaw=+$('p-wt').value,act=+$('p-act').value;
     const out=$('p-out');
-    if(!age||!ht||!wt){out.innerHTML=`<div class="hint">Fill in age, height, and weight to calculate.</div>`;return;}
+    if(!age||!htRaw||!wtRaw){out.innerHTML=`<div class="hint">Fill in age, height, and weight to calculate.</div>`;return;}
+    const ht=unitToCm(htRaw,hu), wt=unitToKg(wtRaw,wu);
     const bmr=10*wt+6.25*ht-5*age+(sex==='male'?5:-161);
     const tdee=bmr*act;
     let target=goal==='lose'?tdee-rate:tdee;
