@@ -363,6 +363,40 @@
   .lib-toggle .lt-label{flex:1;font-family:var(--font);font-weight:600;font-size:14px;color:var(--text);}
   .btn-del-soft{display:flex;align-items:center;justify-content:center;gap:11px;width:100%;height:54px;border-radius:27px;border:none;background:#FCEBEC;color:#E5484D;cursor:pointer;margin-top:14px;font-family:var(--font);font-weight:700;font-size:16px;}
   .btn-del-soft svg{width:20px;height:20px;}
+  .cal-ov{position:fixed;inset:0;z-index:130;background:var(--bg);display:flex;flex-direction:column;overflow:hidden;}
+  .cal-head{background:var(--accent);padding:calc(18px + env(safe-area-inset-top)) 20px 20px;color:#fff;flex:none;}
+  .cal-head-row{display:flex;align-items:center;justify-content:space-between;}
+  .cal-rbtn{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;border:none;background:rgba(255,255,255,.2);color:#fff;cursor:pointer;flex:none;}
+  .cal-rbtn svg{width:16px;height:16px;}
+  .cal-title{font-family:var(--display);font-weight:700;font-size:17px;color:#fff;}
+  .cal-agg{display:flex;align-items:flex-end;gap:8px;margin-top:14px;}
+  .cal-agg .net{font-family:var(--display);font-weight:800;font-size:36px;line-height:1;color:#fff;}
+  .cal-pill{display:inline-flex;align-items:center;gap:3px;background:rgba(255,255,255,.22);border-radius:20px;padding:4px 9px;margin-bottom:5px;font-size:12px;font-weight:700;color:#fff;}
+  .cal-pill svg{width:12px;height:12px;}
+  .cal-sub{font-size:12.5px;color:rgba(255,255,255,.82);margin-top:3px;}
+  .cal-body{flex:1;overflow-y:auto;padding:16px 16px calc(30px + env(safe-area-inset-bottom));border-radius:24px 24px 0 0;margin-top:-10px;background:var(--bg);}
+  .cal-seg{display:flex;gap:6px;background:var(--surface);border-radius:14px;padding:4px;margin-bottom:14px;box-shadow:0 3px 14px rgba(43,42,38,.05);}
+  .cal-seg button{flex:1;text-align:center;padding:9px 0;border:none;border-radius:10px;background:none;font-family:var(--font);font-weight:600;font-size:13px;color:var(--text-soft);cursor:pointer;}
+  .cal-seg button.on{background:var(--accent);color:#fff;}
+  .cal-card{background:var(--surface);border-radius:22px;padding:16px 14px;box-shadow:0 3px 14px rgba(43,42,38,.05);}
+  .cal-dow{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:8px;}
+  .cal-dow div{text-align:center;font-size:10.5px;font-weight:600;color:var(--text-soft);}
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;}
+  .cal-cell{border-radius:9px;padding:6px 1px 5px;display:flex;flex-direction:column;align-items:center;gap:1px;min-height:42px;}
+  .cal-cell .d{font-family:var(--font);font-weight:700;font-size:12px;line-height:1;}
+  .cal-cell .k{font-family:var(--font);font-weight:600;font-size:8.5px;line-height:1;}
+  .cal-legend{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:16px;}
+  .cal-legend .lg{display:flex;align-items:center;gap:6px;font-size:12px;color:#7c766c;}
+  .cal-legend .sw{width:13px;height:13px;border-radius:4px;}
+  .cal-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px;}
+  .cal-stat{background:var(--surface);border-radius:16px;padding:13px;box-shadow:0 3px 14px rgba(43,42,38,.05);}
+  .cal-stat .sh{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-soft);}
+  .cal-stat .sh svg{width:13px;height:13px;flex:none;}
+  .cal-stat .sv{font-family:var(--display);font-weight:800;font-size:22px;margin-top:4px;}
+  .cal-stat .sv small{font-size:13px;color:#C9C2B6;font-weight:800;}
+  .cal-stat .sl{font-size:11px;color:#C9C2B6;margin-top:1px;}
+  .cal-dot{width:8px;height:8px;border-radius:50%;flex:none;}
+  .band-actions{display:flex;gap:8px;align-items:center;}
   .act-pick{display:flex;align-items:center;gap:13px;width:100%;background:var(--accent-bg);border:none;border-radius:18px;padding:14px 16px;cursor:pointer;text-align:left;margin-top:14px;}
   .act-ic{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:13px;background:#fff;color:var(--accent-strong);flex:none;}
   .act-ic svg{width:23px;height:23px;}
@@ -501,6 +535,7 @@ function applyTheme(id){
   r.setProperty('--bg',`linear-gradient(180deg,${t.gradTop},${t.gradBot})`);
 }
 const GEAR_SVG='<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9M17 7h3"/><path d="M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.4" fill="#fff" stroke="none"/><circle cx="9" cy="17" r="2.4" fill="#fff" stroke="none"/></svg>';
+const CAL_SVG='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="17" rx="3"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/><path d="M7.5 13h2M11 13h2M14.5 13h2M7.5 17h2M11 17h2"/></svg>';
 const LOGO_SVG='<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg"><path d="M34 40 L38 18 L56 34 Z" fill="#FFFFFF" stroke="#E37D9A" stroke-width="3" stroke-linejoin="round"/><path d="M86 40 L82 18 L64 34 Z" fill="#FFFFFF" stroke="#E37D9A" stroke-width="3" stroke-linejoin="round"/><path d="M38 33 L40 24 L48 32 Z" fill="#F7C9D6"/><path d="M82 33 L80 24 L72 32 Z" fill="#F7C9D6"/><ellipse cx="60" cy="58" rx="33" ry="31" fill="#FFFFFF" stroke="#E37D9A" stroke-width="3"/><rect x="52" y="30" width="3.5" height="11" rx="1.75" fill="#C9C2BA"/><rect x="58.25" y="29" width="3.5" height="12" rx="1.75" fill="#C9C2BA"/><rect x="64.5" y="30" width="3.5" height="11" rx="1.75" fill="#C9C2BA"/><ellipse cx="48" cy="56" rx="4.2" ry="5.6" fill="#3A332E"/><ellipse cx="72" cy="56" rx="4.2" ry="5.6" fill="#3A332E"/><circle cx="49.4" cy="54" r="1.3" fill="#FFFFFF"/><circle cx="73.4" cy="54" r="1.3" fill="#FFFFFF"/><ellipse cx="40" cy="66" rx="6" ry="4" fill="#F7B9C9"/><ellipse cx="80" cy="66" rx="6" ry="4" fill="#F7B9C9"/><path d="M56 64 Q60 68 64 64" fill="none" stroke="#3A332E" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="60" cy="96" rx="28" ry="15" fill="#E8A85C" stroke="#B9762E" stroke-width="3"/><path d="M44 90 Q52 86 60 90" fill="none" stroke="#B9762E" stroke-width="2.4" stroke-linecap="round"/><path d="M60 90 Q68 86 76 90" fill="none" stroke="#B9762E" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="52" cy="92" rx="8" ry="3" fill="#F4C98A" opacity="0.7"/><ellipse cx="38" cy="92" rx="8" ry="7" fill="#FFFFFF" stroke="#E37D9A" stroke-width="3"/><ellipse cx="82" cy="92" rx="8" ry="7" fill="#FFFFFF" stroke="#E37D9A" stroke-width="3"/></svg>';
 let tab='today';
 let viewDate=todayKey();
@@ -666,10 +701,10 @@ function renderToday(){
   }
   const band=`
     <div class="band">
-      <div class="band-top"><span class="logo"><span class="logo-cat">${LOGO_SVG}</span>NomNom</span><button class="gear" id="open-settings">${GEAR_SVG}</button></div>
+      <div class="band-top"><span class="logo"><span class="logo-cat">${LOGO_SVG}</span>NomNom</span><div class="band-actions"><button class="gear" id="open-cal">${CAL_SVG}</button><button class="gear" id="open-settings">${GEAR_SVG}</button></div></div>
       <div class="bandnav">
         <button class="navbtn" id="day-prev">&#8249;</button>
-        <div><div class="d1">${dayLabel(viewDate)}</div><div class="d2">${subdate}</div></div>
+        <button id="cal-open2" style="background:none;border:none;cursor:pointer;padding:0"><div class="d1">${dayLabel(viewDate)}</div><div class="d2">${subdate}</div></button>
         <button class="navbtn${atToday?' off':''}" id="day-next">&#8250;</button>
       </div>
       <div class="hero">
@@ -695,7 +730,6 @@ function renderToday(){
       ${macro(sum(food,'protein_g'),120,'#18A974','Protein')}
       ${macro(sum(food,'carbs_g'),300,'#F2A93B','Carbs')}
       ${macro(sum(food,'fat_g'),70,'#FF6B4A','Fat')}
-      ${macro(sum(food,'sugar_g'),50,'#E0699A','Sugar')}
     </div></div>`;
 
   // food card grouped by meal
@@ -732,13 +766,124 @@ function renderToday(){
 
   $('main').innerHTML=band+macroCard+foodCard+actCard;
   $('open-settings').onclick=openSettings;
+  $('open-cal').onclick=openCalendar;
+  $('cal-open2').onclick=openCalendar;
   $('day-prev').onclick=()=>{viewDate=shiftDay(viewDate,-1);render();};
   $('day-next').onclick=()=>{if(!atToday){viewDate=shiftDay(viewDate,1);render();}};
   document.querySelectorAll('[data-edit-food]').forEach(n=>n.onclick=()=>editFood(n.dataset.editFood));
   document.querySelectorAll('[data-edit-ex]').forEach(n=>n.onclick=()=>editExercise(n.dataset.editEx));
 }
 
-/* ---------- modal infra ---------- */
+/* ---------- CALENDAR ---------- */
+function openCalendar(){
+  const target=state.settings.dailyTarget;
+  const today=todayKey();
+  const map={};
+  for(const e of state.entries){(map[e.date]=map[e.date]||{c:0,b:0}).c+=e.calories||0;}
+  for(const x of state.exercise){(map[x.date]=map[x.date]||{c:0,b:0}).b+=x.caloriesBurned||0;}
+  const hasData=(k)=>!!(map[k]&&map[k].c>0);
+  const netOf=(k)=>map[k]?(map[k].c-map[k].b):0;
+  const statusOf=(k)=>{ if(k>today)return 'future'; if(!hasData(k))return 'none'; if(!target)return 'data'; return netOf(k)<=target?'under':'over'; };
+  const CELLBG={under:'#18A974',over:'#E5484D',data:'var(--accent-bg)',none:'rgba(43,42,38,.04)',future:'transparent'};
+  const CELLFG={under:'#fff',over:'#fff',data:'var(--text)',none:'var(--text-soft)',future:'#D8D2C8'};
+  const DOW=['S','M','T','W','T','F','S'];
+  const shortLabel=(k)=>new Date(k+'T00:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'});
+  let mode='month';
+  let anchor=new Date(today+'T00:00:00');
+
+  // all-time stats
+  const allDays=Object.keys(map).filter(hasData).sort();
+  let bestStreak=0;
+  if(target){ let run=0,prev=null; for(const k of allDays){ if(netOf(k)<=target){ run=(prev&&shiftDay(prev,1)===k)?run+1:1; bestStreak=Math.max(bestStreak,run); prev=k; } else { run=0; prev=null; } } }
+  let bestDay=null,highDay=null;
+  for(const k of allDays){ const n=netOf(k); if(bestDay===null||n<netOf(bestDay))bestDay=k; if(highDay===null||n>netOf(highDay))highDay=k; }
+
+  const ov=el(`<div class="cal-ov"><div class="cal-head">
+      <div class="cal-head-row">
+        <button class="cal-rbtn" id="cal-prev">${IC_BACK}</button>
+        <span class="cal-title" id="cal-title"></span>
+        <div style="display:flex;gap:7px"><button class="cal-rbtn" id="cal-next">${IC_CHEVR}</button><button class="cal-rbtn" id="cal-x">${IC_X}</button></div>
+      </div>
+      <div class="cal-agg"><span class="net" id="cal-net">—</span><span class="cal-pill" id="cal-pill"></span></div>
+      <div class="cal-sub" id="cal-sub"></div>
+    </div>
+    <div class="cal-body">
+      <div class="cal-seg" id="cal-seg"><button data-m="week">1W</button><button data-m="month">1M</button></div>
+      <div class="cal-card" id="cal-card"></div>
+      <div class="cal-legend"><span class="lg"><span class="sw" style="background:#18A974"></span>Under target</span><span class="lg"><span class="sw" style="background:#E5484D"></span>Over target</span></div>
+      <div class="cal-stats" id="cal-stats"></div>
+    </div></div>`);
+  $('modal-root').appendChild(ov);
+  const close=()=>ov.remove();
+  ov.querySelector('#cal-x').onclick=close;
+  const jump=(k)=>{ viewDate=k; tab='today'; close(); render(); };
+
+  const periodKeys=()=>{
+    const keys=[];
+    if(mode==='month'){
+      const y=anchor.getFullYear(),m=anchor.getMonth(),days=new Date(y,m+1,0).getDate();
+      for(let i=1;i<=days;i++)keys.push(dateKey(new Date(y,m,i)));
+    }else{
+      const s=new Date(anchor);s.setDate(s.getDate()-s.getDay());
+      for(let i=0;i<7;i++){const d=new Date(s);d.setDate(s.getDate()+i);keys.push(dateKey(d));}
+    }
+    return keys;
+  };
+
+  function paint(){
+    if(mode==='month'){ ov.querySelector('#cal-title').textContent=anchor.toLocaleDateString(undefined,{month:'long',year:'numeric'}); }
+    else { const s=new Date(anchor);s.setDate(s.getDate()-s.getDay());const e=new Date(s);e.setDate(s.getDate()+6); ov.querySelector('#cal-title').textContent=`${shortLabel(dateKey(s))} – ${shortLabel(dateKey(e))}`; }
+    ov.querySelectorAll('#cal-seg button').forEach(b=>b.classList.toggle('on',b.dataset.m===mode));
+    const pk=periodKeys().filter(hasData), daysLogged=pk.length;
+    const avg=daysLogged?Math.round(pk.reduce((s,k)=>s+netOf(k),0)/daysLogged):0;
+    ov.querySelector('#cal-net').textContent=daysLogged?r0(avg):'—';
+    const pill=ov.querySelector('#cal-pill');
+    if(daysLogged&&target){
+      const under=avg<=target;
+      pill.style.display='';
+      pill.innerHTML=`<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">${under?'<path d="M12 5v14M6 13l6 6 6-6"/>':'<path d="M12 19V5M6 11l6-6 6 6"/>'}</svg><span>${under?'under':'over'}</span>`;
+    } else pill.style.display='none';
+    ov.querySelector('#cal-sub').textContent=daysLogged?`avg net/day · ${daysLogged} day${daysLogged===1?'':'s'} logged${target?'':' · set a daily target to track on/over'}`:'No days logged this period';
+
+    const card=ov.querySelector('#cal-card');
+    if(mode==='month'){
+      const y=anchor.getFullYear(),m=anchor.getMonth(),first=new Date(y,m,1).getDay(),days=new Date(y,m+1,0).getDate();
+      let cells='';
+      for(let i=0;i<first;i++)cells+=`<div></div>`;
+      for(let dd=1;dd<=days;dd++){
+        const k=dateKey(new Date(y,m,dd)),st=statusOf(k),clk=k<=today;
+        const kc=hasData(k)?`<span class="k" style="color:${CELLFG[st]}">${r0(netOf(k))}</span>`:'';
+        cells+=`<div class="cal-cell" data-jump="${clk?k:''}" style="background:${CELLBG[st]};cursor:${clk?'pointer':'default'}"><span class="d" style="color:${CELLFG[st]}">${dd}</span>${kc}</div>`;
+      }
+      card.innerHTML=`<div class="cal-dow">${DOW.map(d=>`<div>${d}</div>`).join('')}</div><div class="cal-grid">${cells}</div>`;
+    }else{
+      const s=new Date(anchor);s.setDate(s.getDate()-s.getDay());
+      let cells='';
+      for(let i=0;i<7;i++){
+        const d=new Date(s);d.setDate(s.getDate()+i);const k=dateKey(d),st=statusOf(k),clk=k<=today;
+        const lab=hasData(k)?r0(netOf(k)):(k>today?'·':'–');
+        cells+=`<div style="display:flex;flex-direction:column;align-items:center;gap:4px"><span style="font-size:10px;font-weight:600;color:var(--text-soft)">${DOW[i]}</span>
+          <div class="cal-cell" data-jump="${clk?k:''}" style="width:100%;background:${CELLBG[st]};border-radius:11px;padding:9px 2px;cursor:${clk?'pointer':'default'}"><span class="d" style="font-size:13px;color:${CELLFG[st]}">${d.getDate()}</span><span class="k" style="font-size:9.5px;color:${CELLFG[st]}">${lab}</span></div></div>`;
+      }
+      card.innerHTML=`<div class="cal-grid">${cells}</div>`;
+    }
+    card.querySelectorAll('[data-jump]').forEach(c=>{ if(c.dataset.jump)c.onclick=()=>jump(c.dataset.jump); });
+
+    const pkAll=periodKeys().filter(hasData);
+    const daysOn=target?pkAll.filter(k=>netOf(k)<=target).length:0;
+    const icC='<svg viewBox="0 0 24 24" fill="none" stroke="#18A974" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+    const icF='<svg viewBox="0 0 24 24" fill="none" stroke="#F2A93B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2c1.5 3 4 4 4 7a4 4 0 01-8 0c0-1 .3-1.8.8-2.5C9 9 12 8 12 2z"/></svg>';
+    ov.querySelector('#cal-stats').innerHTML=`
+      <div class="cal-stat"><div class="sh">${icC}Days on target</div><div class="sv" style="color:#18A974">${target?daysOn:'—'}<small>${target?` /${pkAll.length}`:''}</small></div></div>
+      <div class="cal-stat"><div class="sh">${icF}Best streak</div><div class="sv" style="color:var(--text)">${target?bestStreak:'—'}<small> days</small></div></div>
+      <div class="cal-stat"><div class="sh"><span class="cal-dot" style="background:#18A974"></span>Best day</div><div class="sv" style="color:#18A974">${bestDay?r0(netOf(bestDay)):'—'}</div><div class="sl">${bestDay?shortLabel(bestDay):'No data yet'}</div></div>
+      <div class="cal-stat"><div class="sh"><span class="cal-dot" style="background:#E5484D"></span>Highest day</div><div class="sv" style="color:#E5484D">${highDay?r0(netOf(highDay)):'—'}</div><div class="sl">${highDay?shortLabel(highDay):'No data yet'}</div></div>`;
+  }
+  ov.querySelector('#cal-prev').onclick=()=>{ if(mode==='month')anchor.setMonth(anchor.getMonth()-1); else anchor.setDate(anchor.getDate()-7); paint(); };
+  ov.querySelector('#cal-next').onclick=()=>{ if(mode==='month')anchor.setMonth(anchor.getMonth()+1); else anchor.setDate(anchor.getDate()+7); paint(); };
+  ov.querySelectorAll('#cal-seg button').forEach(b=>b.onclick=()=>{mode=b.dataset.m;paint();});
+  paint();
+}
 function openModal(title,bodyHtml){
   const m=el(`<div class="overlay"><div class="overlay-inner"><div class="mhead"><h2>${esc(title)}</h2><button class="linkbtn" id="m-close">Close</button></div><div id="m-body">${bodyHtml}</div></div></div>`);
   $('modal-root').appendChild(m);
