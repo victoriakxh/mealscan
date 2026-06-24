@@ -321,6 +321,16 @@
   .steps li{font-size:13.5px;color:var(--text);margin:6px 0;line-height:1.45;}
   .rc-acts{display:flex;gap:8px;margin-top:15px;}
   .rc-acts .btn{flex:1;}
+  .edit-ing{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 0;border-bottom:1px solid var(--divider);}
+  #re-ings .edit-ing:last-child{border-bottom:none;}
+  .ei-name{font-size:14px;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .ei-right{display:flex;align-items:center;gap:6px;flex:none;}
+  .ei-g{width:56px;text-align:right;border:1.5px solid var(--divider);border-radius:9px;padding:6px 8px;font-size:14px;font-family:var(--body);color:var(--text);background:var(--surface);outline:none;-moz-appearance:textfield;}
+  .ei-g::-webkit-outer-spin-button,.ei-g::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+  .ei-u{font-size:12.5px;color:var(--text-soft);margin-left:-2px;}
+  .ei-k{font-size:12.5px;color:var(--text-soft);min-width:58px;text-align:right;}
+  .ei-rm{background:none;border:none;color:var(--text-soft);display:inline-flex;cursor:pointer;padding:2px;}
+  .ei-rm svg{width:16px;height:16px;}
   .add-label{font-family:var(--body);font-weight:600;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-soft);margin:20px 2px 6px;}
   .recent-row{display:flex;align-items:center;gap:12px;padding:10px 2px;border-bottom:1px solid var(--divider);}
   .recent-ic{display:flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:var(--accent-bg);color:var(--accent-strong);flex:none;}
@@ -1330,6 +1340,80 @@ function openAdd(){
     file.onchange=async(ev)=>{ const f=ev.target.files[0]; if(!f)return; camStop(); try{ analyze(await toJpegBase64(f)); }catch(e){ body.querySelector('#sc-stage').innerHTML=`<div class="err">Could not read that image.</div>`; } };
   }
 
+  function editRecipeView(rec, backFn){
+    camStop(); setTabs(false);
+    const work=JSON.parse(JSON.stringify(rec));
+    if(!Array.isArray(work.ingredients))work.ingredients=[];
+    const oCal=(work.total&&work.total.calories)||0, oP=(work.total&&work.total.protein_g)||0, oC=(work.total&&work.total.carbs_g)||0, oF=(work.total&&work.total.fat_g)||0;
+    work.ingredients.forEach(ing=>{ const g=+ing.grams||0;
+      ing._rk=g>0?(+ing.kcal||0)/g:0;
+      ing._rp=(g>0&&ing.protein_g!=null)?(+ing.protein_g)/g:null;
+      ing._rc=(g>0&&ing.carbs_g!=null)?(+ing.carbs_g)/g:null;
+      ing._rf=(g>0&&ing.fat_g!=null)?(+ing.fat_g)/g:null; });
+    function recompute(){
+      let tk=0,tp=0,tc=0,tf=0,allMac=work.ingredients.length>0;
+      work.ingredients.forEach(ing=>{ const g=+ing.grams||0; ing.kcal=Math.round(ing._rk*g); tk+=ing._rk*g;
+        if(ing._rp!=null)tp+=ing._rp*g; else allMac=false;
+        if(ing._rc!=null)tc+=ing._rc*g; if(ing._rf!=null)tf+=ing._rf*g; });
+      const sv=Math.max(1,Math.round(+work.servings||1));
+      let TP,TC,TF;
+      if(allMac){TP=tp;TC=tc;TF=tf;} else { const r=oCal>0?tk/oCal:0; TP=oP*r;TC=oC*r;TF=oF*r; }
+      work.total={calories:Math.round(tk),protein_g:Math.round(TP),carbs_g:Math.round(TC),fat_g:Math.round(TF)};
+      work.per={calories:Math.round(tk/sv),protein_g:Math.round(TP/sv),carbs_g:Math.round(TC/sv),fat_g:Math.round(TF/sv)};
+    }
+    function preview(){ const per=work.per||{calories:0}, tot=work.total||{calories:0}, sv=Math.max(1,Math.round(+work.servings||1));
+      return `<div class="rc-top"><div><div class="rc-meta">makes ${sv} serving${sv===1?'':'s'} · ${tot.calories} kcal total</div></div><div class="rc-kcal"><b>${per.calories}</b><span>kcal/serving</span></div></div><div class="fitlabel" style="margin-top:6px">${per.protein_g||0} g protein/serving</div>`; }
+    function refreshNums(){ recompute();
+      work.ingredients.forEach((ing,i)=>{ const k=body.querySelector('.ei-k[data-i="'+i+'"]'); if(k)k.textContent=ing.kcal+' kcal'; });
+      const pv=body.querySelector('#re-prev'); if(pv)pv.innerHTML=preview(); }
+    function draw(){
+      recompute();
+      const sv=Math.max(1,Math.round(+work.servings||1));
+      body.innerHTML=`
+        <div class="sub-head"><button class="circ-back" id="re-back">${IC_BACK}</button><h3>Edit recipe</h3></div>
+        <div class="scard">
+          <div class="field"><label>Recipe name</label><input id="re-name" value="${esc(work.name||'')}" autocomplete="off"></div>
+          <div class="prow" style="margin-top:8px"><span class="lab">Makes (servings)</span><div class="pstep"><button id="re-svdn">${IC_MINUS}</button><span class="val" id="re-sv">${sv}</span><button id="re-svup">${IC_PLUS}</button></div></div>
+        </div>
+        <div class="scard">
+          <div class="scard-h">Ingredients</div>
+          <div id="re-ings">${work.ingredients.map((ing,i)=>`
+            <div class="edit-ing">
+              <div class="ei-name">${esc(ing.name)}</div>
+              <div class="ei-right">
+                <input class="ei-g" type="number" inputmode="decimal" min="0" data-i="${i}" value="${r0(ing.grams)}"><span class="ei-u">g</span>
+                <span class="ei-k" data-i="${i}">${ing.kcal} kcal</span>
+                <button class="ei-rm" data-rm="${i}" aria-label="Remove">${IC_X}</button>
+              </div>
+            </div>`).join('')}</div>
+          ${work.ingredients.length?'':`<div class="rc-empty">No ingredients left — cancel to keep the original.</div>`}
+        </div>
+        <div class="rc-card" id="re-prev">${preview()}</div>
+        <div class="rc-acts"><button class="btn" id="re-cancel">Cancel</button><button class="btn btn-primary" id="re-save">Save changes</button></div>`;
+      body.querySelector('#re-back').onclick=()=>openRecipeDetail(rec,backFn);
+      body.querySelector('#re-cancel').onclick=()=>openRecipeDetail(rec,backFn);
+      body.querySelector('#re-name').oninput=(e)=>{work.name=e.target.value;};
+      body.querySelector('#re-svup').onclick=()=>{work.servings=Math.min(20,sv+1);body.querySelector('#re-sv').textContent=work.servings;refreshNums();};
+      body.querySelector('#re-svdn').onclick=()=>{work.servings=Math.max(1,sv-1);body.querySelector('#re-sv').textContent=work.servings;refreshNums();};
+      body.querySelectorAll('.ei-g').forEach(inp=>inp.oninput=(e)=>{ const i=+e.target.dataset.i; if(work.ingredients[i]){work.ingredients[i].grams=+e.target.value||0; refreshNums();} });
+      body.querySelectorAll('[data-rm]').forEach(btn=>btn.onclick=()=>{ work.ingredients.splice(+btn.dataset.rm,1); draw(); });
+      body.querySelector('#re-save').onclick=()=>{
+        recompute();
+        const name=(work.name||'').trim()||rec.name, svv=Math.max(1,Math.round(+work.servings||1));
+        const clean=JSON.parse(JSON.stringify(rec));
+        clean.name=name; clean.servings=svv;
+        clean.ingredients=work.ingredients.map(ing=>{ const g=+ing.grams||0; return {name:ing.name,grams:g,have:!!ing.have,kcal:Math.round(ing._rk*g),
+          protein_g:ing._rp!=null?Math.round(ing._rp*g):(ing.protein_g||0),
+          carbs_g:ing._rc!=null?Math.round(ing._rc*g):(ing.carbs_g||0),
+          fat_g:ing._rf!=null?Math.round(ing._rf*g):(ing.fat_g||0)}; });
+        clean.total=work.total; clean.per=work.per;
+        const idx=state.recipes.findIndex(x=>x.id===rec.id); if(idx>=0)state.recipes[idx]=clean; else state.recipes.push(clean);
+        save();
+        openRecipeDetail(clean,backFn);
+      };
+    }
+    draw();
+  }
   function openRecipeDetail(rec, backFn){
     camStop(); setTabs(false);
     const base=Math.max(1,Math.round(rec.servings||1));
@@ -1356,10 +1440,12 @@ function openAdd(){
         </div>
         <div class="scard">
           <div class="field"><label>Log to</label><div class="chips" id="rd-meal">${MEALS.map(m=>`<button class="chip${m===meal?' sel':''}" data-m="${m}">${m}</button>`).join('')}</div></div>
-          <div class="rc-acts"><button class="btn" id="rd-del">Delete</button><button class="btn btn-primary" id="rd-log">Log 1 serving</button></div>
+          <div class="rc-acts"><button class="btn" id="rd-edit">Edit</button><button class="btn" id="rd-del">Delete</button></div>
+          <button class="btn btn-primary btn-block" id="rd-log" style="margin-top:8px">Log 1 serving</button>
           <div id="rd-msg"></div>
         </div>`;
       body.querySelector('#rd-back').onclick=backFn;
+      body.querySelector('#rd-edit').onclick=()=>editRecipeView(rec,backFn);
       body.querySelector('#rd-up').onclick=()=>{cur=Math.min(20,cur+1);draw();};
       body.querySelector('#rd-dn').onclick=()=>{cur=Math.max(1,cur-1);draw();};
       body.querySelectorAll('#rd-meal .chip').forEach(c=>c.onclick=()=>{meal=c.dataset.m;body.querySelectorAll('#rd-meal .chip').forEach(x=>x.classList.toggle('sel',x===c));});
@@ -1493,7 +1579,7 @@ function openAdd(){
       out.querySelectorAll('[data-sw]').forEach(b=>b.onclick=()=>{ const [i,gi]=b.dataset.sw.split(':'); const box=out.querySelector('#sw-'+i+'-'+gi); if(box)box.style.display=box.style.display==='none'?'':'none'; });
       out.querySelectorAll('[data-apply]').forEach(b=>b.onclick=async()=>{ const [i,gi,ai]=b.dataset.apply.split(':').map(Number); const r=recipes[i],ing=r.ingredients[gi],alt=(ing.alts||[])[ai]; if(!alt)return; ing.name=alt.name; if(alt.job==='have')ing.have=true; ing.alts=[]; b.textContent='…'; try{ await costRecipe(r); }catch(_){ } renderResults(recipes); });
       out.querySelectorAll('[data-log]').forEach(b=>b.onclick=()=>{ const r=recipes[+b.dataset.log],per=r._per||{calories:0}; state.entries.push({id:uid(),date:viewDate,meal:rc.meal,name:r.name,grams:0,portion:'serving',unitCal:per.calories,servingLabel:'1 serving',calories:per.calories,protein_g:per.protein_g||0,carbs_g:per.carbs_g||0,fat_g:per.fat_g||0,sugar_g:0,source:'recipe'}); save(); sh.close(); });
-      out.querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>{ const r=recipes[+b.dataset.save],per=r._per||{calories:0},tot=r._total||{calories:0}; state.recipes.push({id:uid(),name:r.name,servings:Math.max(1,Math.round(+r.servings||rc.servings)),meal:rc.meal,note:r.note||'',time_min:r.time_min||null,per:{calories:per.calories,protein_g:per.protein_g||0,carbs_g:per.carbs_g||0,fat_g:per.fat_g||0},total:{calories:tot.calories,protein_g:tot.protein_g||0,carbs_g:tot.carbs_g||0,fat_g:tot.fat_g||0},ingredients:(r.ingredients||[]).map(x=>({name:x.name,grams:+x.grams||0,have:!!x.have,kcal:x._kcal||0})),steps:(r.steps||[]).slice(),createdAt:Date.now()}); save(); const m=out.querySelector('[data-msg="'+b.dataset.save+'"]'); if(m)m.innerHTML=`<div class="saved-note" style="margin-top:8px">Saved to Recipes ✓</div>`; b.disabled=true; });
+      out.querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>{ const r=recipes[+b.dataset.save],per=r._per||{calories:0},tot=r._total||{calories:0}; state.recipes.push({id:uid(),name:r.name,servings:Math.max(1,Math.round(+r.servings||rc.servings)),meal:rc.meal,note:r.note||'',time_min:r.time_min||null,per:{calories:per.calories,protein_g:per.protein_g||0,carbs_g:per.carbs_g||0,fat_g:per.fat_g||0},total:{calories:tot.calories,protein_g:tot.protein_g||0,carbs_g:tot.carbs_g||0,fat_g:tot.fat_g||0},ingredients:(r.ingredients||[]).map(x=>({name:x.name,grams:+x.grams||0,have:!!x.have,kcal:x._kcal||0,protein_g:x._prot||0,carbs_g:x._carb||0,fat_g:x._fat||0})),steps:(r.steps||[]).slice(),createdAt:Date.now()}); save(); const m=out.querySelector('[data-msg="'+b.dataset.save+'"]'); if(m)m.innerHTML=`<div class="saved-note" style="margin-top:8px">Saved to Recipes ✓</div>`; b.disabled=true; });
       out.querySelector('#rc-more').onclick=()=>generate();
     }
 
@@ -2106,7 +2192,7 @@ async function costRecipe(recipe){
     const g=+ing.grams||0; let kcal=null,p=0,c=0,f=0,matched=false;
     if(g>0){ const m=bestFoodMatch(ing.name); if(m){ kcal=m.per100.calories*g/100; p=m.per100.protein_g*g/100; c=m.per100.carbs_g*g/100; f=m.per100.fat_g*g/100; matched=true; } }
     if(kcal==null){ kcal=+ing.kcal||0; p=+ing.protein_g||0; if(g>0&&kcal>0)anyEst=true; }
-    ing._kcal=Math.round(kcal); ing._matched=matched;
+    ing._kcal=Math.round(kcal); ing._matched=matched; ing._prot=Math.round(p); ing._carb=Math.round(c); ing._fat=Math.round(f);
     tk+=kcal; tp+=p; tc+=c; tf+=f;
   }
   const sv=Math.max(1,Math.round(+recipe.servings||1));
