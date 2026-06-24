@@ -661,7 +661,7 @@ function renderToday(){
   const heroLabel = target ? 'calories remaining' : 'calories eaten';
   let progressHtml='';
   if(target){
-    const pct=Math.max(0,Math.min(100,Math.round(consumed/target*100)));
+    const pct=Math.max(0,Math.min(100,Math.round((consumed-burned)/target*100)));
     progressHtml=`<div class="progress"><div class="track"><div class="fill" style="width:${pct}%"></div></div><div class="pct">${pct}%</div></div>`;
   }
   const band=`
@@ -1810,7 +1810,7 @@ function editFood(id){
     root.querySelectorAll('#ef-q button').forEach(b=>b.classList.toggle('on',+b.dataset.q===servings));
   };
   if(!perServing){
-    const MIN=20,MAX=600;
+    const MIN=5,MAX=600;
     const sl=root.querySelector('#ef-slider'),fillEl=root.querySelector('#ef-fill'),thumbEl=root.querySelector('#ef-thumb');
     placeSize=()=>{const f=Math.max(0,Math.min(1,(size-MIN)/(MAX-MIN)));fillEl.style.width=(f*100)+'%';thumbEl.style.left='calc('+f+' * (100% - 26px))';};
     const setFromX=(x)=>{const r=sl.getBoundingClientRect();let f=(x-r.left-13)/(r.width-26);f=Math.max(0,Math.min(1,f));size=Math.round((MIN+f*(MAX-MIN))/5)*5;repaint();};
