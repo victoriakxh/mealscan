@@ -661,7 +661,8 @@ let sb=null, user=null, CLOUD=false;
 const DEFAULT={
   settings:{apiKey:'',model:'gemini-2.5-flash',weightUnit:'kg',heightUnit:'cm',dailyTarget:null,theme:'pink',meals:{Breakfast:true,Lunch:true,Dinner:true,Snack:true}},
   entries:[], exercise:[], library:[], weights:[], meals:[], recipes:[],
-  profile:{sex:'male',age:'',height:'',activity:1.2,goal:'maintain',lossRate:500,rate:0.5,goalWeight:null}
+  profile:{sex:'male',age:'',height:'',activity:1.2,goal:'maintain',lossRate:500,rate:0.5,goalWeight:null},
+  competition:null
 };
 let state=load();
 if(!Array.isArray(state.recipes))state.recipes=[];
@@ -3374,6 +3375,15 @@ function openSettings(){
     ${(CLOUD&&user)?`<div class="set-card set-prof" style="margin-top:10px">
       <div class="set-av">${esc(initials)}</div>
       <div class="grow"><div class="set-name">${esc(displayName)}</div><div class="set-email">${esc(email)}</div></div>
+    </div>
+
+    <div class="set-sec">Friends</div>
+    <div class="set-card">
+      <div class="set-row first" id="set-compete" style="cursor:pointer">
+        <div class="set-ico">${I('<path d="M6 9H4.5a2.5 2.5 0 010-5H6M18 9h1.5a2.5 2.5 0 000-5H18"/><path d="M6 4h12v4a6 6 0 01-12 0z"/><path d="M9 15h6M8 20h8M12 15v5"/>')}</div>
+        <div class="grow"><div class="set-rt">Compete with a friend</div><div class="set-rs" id="set-compete-sub">${state.competition?'View your leaderboard':'Race someone on sticking to your plan'}</div></div>
+        <span class="set-chev">${IC_CHEVR}</span>
+      </div>
     </div>`:''}
 
     <div class="set-sec">Units</div>
@@ -3549,6 +3559,324 @@ function openSettings(){
   };
   overlay.querySelector('#set-clear').onclick=()=>{if(confirm('Erase all data? This cannot be undone.')){localStorage.removeItem(KEY);state=structuredClone(DEFAULT);if(CLOUD&&user){saveLocal();pushCloud();}close();}};
   const so=overlay.querySelector('#set-signout'); if(so)so.onclick=()=>{overlay.remove();signOut();};
+  const compBtn=overlay.querySelector('#set-compete');
+  if(compBtn)compBtn.onclick=()=>{ close(); setTimeout(openLeaderboard,200); };
+}
+
+/* ================================================================
+   LEADERBOARD — head-to-head competition with one friend
+   Fairness: each person races their own Plan-tab target, so different
+   genders / weights / goals compete on adherence, not raw kg.
+   Only DERIVED scores (points + %-progress) ever leave the device.
+   ================================================================ */
+
+/* ----- scoring (pure functions of local state) ----- */
+function compCalorieScore(C,T){                 // 0..80
+  if(!T)return 0;
+  if(C<=T)return 80;
+  return Math.max(0, 80*(1-(C-T)/(0.25*T)));
+}
+function compDayCalories(d){ return sum(state.entries.filter(e=>e.date===d),'calories'); }
+function compDayLogged(d){ return state.entries.some(e=>e.date===d); }
+function compDailyScore(d){                      // 0..100
+  const T=state.settings.dailyTarget;
+  if(!T || !compDayLogged(d)) return 0;          // no log = 0 (showing up is the point)
+  return 20 + compCalorieScore(compDayCalories(d), T);
+}
+function compWeekDays(){                          // Mon..Sun of the current week
+  const now=new Date(); const off=(now.getDay()+6)%7; // 0=Mon
+  const mon=new Date(now); mon.setDate(now.getDate()-off); mon.setHours(0,0,0,0);
+  const out=[]; for(let i=0;i<7;i++){const x=new Date(mon);x.setDate(mon.getDate()+i);out.push(dateKey(x));}
+  return out;
+}
+function compWeekTotalLocal(){
+  const days=compWeekDays(), tk=todayKey();
+  let pts=0, elapsed=0, loggedCount=0;
+  for(const d of days){ if(d>tk)continue; elapsed++; pts+=compDailyScore(d); if(compDayLogged(d))loggedCount++; }
+  const fullLog = days.every(d=> d<=tk && compDayLogged(d));   // only reachable at week's end
+  return { points: Math.round(pts + (fullLog?25:0)), elapsed, loggedCount, fullLog };
+}
+function compSeasonPct(){
+  const c=state.competition; if(!c)return null;
+  const start=c.startWeightKg, goal=state.profile.goalWeight, cur=latestWeightKg();
+  if(start==null||goal==null||cur==null||start===goal)return null;
+  const p=(start-cur)/(start-goal)*100;
+  if(!isFinite(p))return null;
+  return Math.max(0,Math.min(100,p));
+}
+function compMilestones(pct){ return [25,50,75,100].filter(m=>pct!=null&&pct>=m); }
+
+/* ----- who am I (display name, matches Settings) ----- */
+function compMyName(){
+  const meta=(user&&user.user_metadata)||{}, email=(user&&user.email)||'';
+  const namePart=(email.split('@')[0]||'').replace(/[._-]+/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+  return meta.full_name||meta.name||namePart||'You';
+}
+
+/* ----- Supabase wrappers ----- */
+async function compCreate(){
+  const name=compMyName();
+  const {data,error}=await sb.rpc('create_competition',{p_display_name:name});
+  if(error)throw error;
+  state.competition={id:data.id,code:data.code,role:'host',startWeightKg:latestWeightKg(),name};
+  save();
+  return data;
+}
+async function compJoin(code){
+  const name=compMyName();
+  const {data,error}=await sb.rpc('join_competition',{p_code:String(code||'').trim().toUpperCase(),p_display_name:name});
+  if(error)throw error;
+  state.competition={id:data.id,code:data.code,role:'guest',startWeightKg:latestWeightKg(),name};
+  save();
+  return data;
+}
+async function compPushMine(){
+  const c=state.competition; if(!c||!CLOUD||!user)return;
+  const days=compWeekDays(), tk=todayKey(), pct=compSeasonPct(), now=new Date().toISOString();
+  const rows=days.filter(d=>d<=tk).map(d=>({
+    competition_id:c.id, user_id:user.id, date:d,
+    daily_points:Math.round(compDailyScore(d)), logged:compDayLogged(d),
+    progress_pct:pct, updated_at:now
+  }));
+  if(rows.length) await sb.from('competition_scores').upsert(rows,{onConflict:'competition_id,user_id,date'});
+}
+async function compFetchAll(){
+  const c=state.competition; if(!c)return null;
+  const days=compWeekDays();
+  const [memR,scR,cmpR]=await Promise.all([
+    sb.from('competition_members').select('user_id,display_name').eq('competition_id',c.id),
+    sb.from('competition_scores').select('user_id,date,daily_points,logged,progress_pct').eq('competition_id',c.id).in('date',days),
+    sb.from('competitions').select('status,invite_code').eq('id',c.id).maybeSingle()
+  ]);
+  if(memR.error)throw memR.error;
+  const members=memR.data||[], scores=scR.data||[], status=(cmpR.data&&cmpR.data.status)||'pending';
+  const byUser={};
+  members.forEach(m=>{ byUser[m.user_id]={id:m.user_id,name:m.display_name||'Player',week:0,pct:null,logged:0}; });
+  scores.forEach(r=>{
+    const u=byUser[r.user_id]; if(!u)return;
+    u.week+=(r.daily_points||0);
+    if(r.logged)u.logged++;
+    if(r.progress_pct!=null)u.pct=r.progress_pct;   // same value across rows; keep it
+  });
+  // full-log bonus per user (all 7 days present + logged)
+  Object.values(byUser).forEach(u=>{
+    const set=new Set(scores.filter(r=>r.user_id===u.id&&r.logged).map(r=>r.date));
+    if(days.every(d=>set.has(d)))u.week+=25;
+  });
+  const me=byUser[user.id]||{id:user.id,name:c.name,week:0,pct:null,logged:0};
+  const them=Object.values(byUser).find(u=>u.id!==user.id)||null;
+  return { status, me, them, invite:(cmpR.data&&cmpR.data.invite_code)||c.code };
+}
+async function compLeave(){
+  const c=state.competition; if(!c)return;
+  try{ await sb.from('competition_members').delete().eq('competition_id',c.id).eq('user_id',user.id); }catch(e){}
+  state.competition=null; save();
+}
+
+/* ----- one-time styles ----- */
+function compEnsureStyle(){
+  if($('comp-style'))return;
+  const st=document.createElement('style'); st.id='comp-style';
+  st.textContent=`
+   .lb-hero{text-align:center;padding:8px 0 18px}
+   .lb-hero .lb-emoji{font-size:40px;line-height:1}
+   .lb-hero h3{font-family:var(--display);font-size:20px;margin:10px 0 4px}
+   .lb-hero p{color:var(--text-soft);font-size:14px;margin:0;line-height:1.5}
+   .lb-code{font-family:var(--display);font-weight:800;font-size:30px;letter-spacing:3px;color:var(--accent-strong);
+     text-align:center;background:var(--accent-bg);border-radius:18px;padding:18px 0;margin:14px 0}
+   .lb-vs{display:flex;align-items:stretch;gap:10px;margin:6px 0 4px}
+   .lb-vs .col{flex:1;background:var(--surface);border-radius:20px;padding:16px 14px;box-shadow:0 3px 14px rgba(43,42,38,.05);text-align:center}
+   .lb-vs .col.lead{outline:2px solid var(--accent)}
+   .lb-vs .who{font-family:var(--display);font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+   .lb-vs .pts{font-family:var(--display);font-weight:800;font-size:34px;color:var(--accent-strong);line-height:1.1;margin-top:4px}
+   .lb-vs .plab{font-size:11px;color:var(--text-soft);text-transform:uppercase;letter-spacing:.5px}
+   .lb-vs .mid{display:flex;align-items:center;font-family:var(--display);font-weight:800;color:var(--text-soft);font-size:13px}
+   .lb-season{background:var(--surface);border-radius:20px;padding:16px;box-shadow:0 3px 14px rgba(43,42,38,.05);margin-top:12px}
+   .lb-season .sr{margin:12px 0}
+   .lb-season .sr:first-child{margin-top:6px}
+   .lb-season .srh{display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px}
+   .lb-season .srh b{font-family:var(--display)}
+   .lb-bar{height:12px;border-radius:999px;background:var(--accent-bg);overflow:hidden}
+   .lb-bar>span{display:block;height:100%;border-radius:999px;background:var(--accent-strong);transition:width .4s}
+   .lb-badges{margin-top:6px;font-size:12px;color:var(--text-soft)}
+   .lb-note{color:var(--text-soft);font-size:13px;line-height:1.5;text-align:center;margin-top:14px}
+   .lb-wait{display:flex;align-items:center;gap:8px;justify-content:center;color:var(--text-soft);font-size:14px;margin-top:8px}
+   .lb-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:lbp 1s infinite}
+   @keyframes lbp{0%,100%{opacity:.3}50%{opacity:1}}
+   .lb-sec{font-size:13px;font-weight:700;color:var(--text-soft);margin:20px 4px 8px}
+   .lb-leave{width:100%;margin-top:16px;padding:14px 0;border:none;border-radius:16px;background:var(--surface);
+     box-shadow:0 3px 14px rgba(43,42,38,.05);font-family:var(--display);font-weight:700;color:#E5533A;cursor:pointer}
+  `;
+  document.head.appendChild(st);
+}
+
+/* ----- the sheet ----- */
+function openLeaderboard(){
+  compEnsureStyle();
+  const sh=makeSheet(`<div class="set-sheet" style="padding-bottom:8px"><h2 style="margin:4px 0 2px">Compete</h2><div id="lb-body"></div></div>`);
+  const body=sh.overlay.querySelector('#lb-body');
+  const set=(html)=>{ body.innerHTML=html; };
+
+  function viewStart(){
+    set(`
+      <div class="lb-hero">
+        <div class="lb-emoji">🏁</div>
+        <h3>Race a friend</h3>
+        <p>Compete on sticking to your plan — not on the scale. You each race your own daily target, so different bodies and goals stay fair.</p>
+      </div>
+      <button class="btn btn-primary btn-block" id="lb-create">Start a competition</button>
+      <button class="btn btn-block" id="lb-joinbtn" style="margin-top:10px">Join with a code</button>
+      ${!state.settings.dailyTarget?`<div class="lb-note">Set a daily calorie target in the Plan tab first — it's what makes the scoring fair.</div>`:''}
+    `);
+    body.querySelector('#lb-create').onclick=async()=>{
+      if(!state.settings.dailyTarget){ toastComp('Set a daily target in Plan first.'); return; }
+      const btn=body.querySelector('#lb-create'); btn.disabled=true; btn.textContent='Creating…';
+      try{ await compCreate(); viewInvite(); }
+      catch(e){ btn.disabled=false; btn.textContent='Start a competition'; toastComp(e.message||'Could not create.'); }
+    };
+    body.querySelector('#lb-joinbtn').onclick=viewJoin;
+  }
+
+  function viewInvite(){
+    const c=state.competition;
+    set(`
+      <div class="lb-hero">
+        <div class="lb-emoji">📨</div>
+        <h3>Share your code</h3>
+        <p>Send this to your friend. When they join with it, the race begins.</p>
+      </div>
+      <div class="lb-code">${esc(c.code)}</div>
+      <button class="btn btn-primary btn-block" id="lb-share">Share code</button>
+      <div class="lb-wait"><span class="lb-dot"></span> Waiting for your friend to join…</div>
+      <button class="btn btn-block" id="lb-refresh" style="margin-top:14px">I've shared it — check now</button>
+      <button class="lb-leave" id="lb-cancel">Cancel competition</button>
+    `);
+    body.querySelector('#lb-share').onclick=async()=>{
+      const txt=`Join my NomNom competition — code ${c.code}`;
+      if(navigator.share){ try{ await navigator.share({text:txt}); }catch(e){} }
+      else{ try{ await navigator.clipboard.writeText(c.code); toastComp('Code copied'); }catch(e){ toastComp(c.code); } }
+    };
+    body.querySelector('#lb-refresh').onclick=()=>viewBoard();
+    body.querySelector('#lb-cancel').onclick=async()=>{ await compLeave(); viewStart(); };
+  }
+
+  function viewJoin(){
+    set(`
+      <div class="lb-hero">
+        <div class="lb-emoji">🔑</div>
+        <h3>Join a competition</h3>
+        <p>Enter the code your friend shared with you.</p>
+      </div>
+      <input id="lb-code" placeholder="NOM-XXXX" autocapitalize="characters" autocomplete="off"
+        style="width:100%;text-align:center;font-family:var(--display);font-weight:800;font-size:22px;letter-spacing:2px;box-sizing:border-box">
+      <button class="btn btn-primary btn-block" id="lb-do" style="margin-top:14px">Join</button>
+      <button class="btn btn-block" id="lb-back" style="margin-top:10px">Back</button>
+      <div id="lb-jmsg"></div>
+    `);
+    const inp=body.querySelector('#lb-code'); inp.focus();
+    body.querySelector('#lb-do').onclick=async()=>{
+      const code=inp.value.trim(); if(!code){ inp.focus(); return; }
+      if(!state.settings.dailyTarget){ toastComp('Set a daily target in Plan first.'); return; }
+      const btn=body.querySelector('#lb-do'); btn.disabled=true; btn.textContent='Joining…';
+      try{ await compJoin(code); viewBoard(); }
+      catch(e){
+        btn.disabled=false; btn.textContent='Join';
+        body.querySelector('#lb-jmsg').innerHTML=`<div class="lb-note" style="color:#E5533A">${esc(e.message||'Could not join.')}</div>`;
+      }
+    };
+    body.querySelector('#lb-back').onclick=viewStart;
+  }
+
+  async function viewBoard(){
+    set(`<div class="lb-wait" style="margin-top:40px"><span class="lb-dot"></span> Loading the scoreboard…</div>`);
+    let data;
+    try{ await compPushMine(); data=await compFetchAll(); }
+    catch(e){ set(`<div class="lb-note" style="color:#E5533A;margin-top:30px">${esc(e.message||'Could not load.')}</div>
+      <button class="btn btn-block" id="lb-retry" style="margin-top:14px">Try again</button>`);
+      body.querySelector('#lb-retry').onclick=viewBoard; return; }
+
+    if(!data){ viewStart(); return; }
+
+    // opponent hasn't joined yet
+    if(!data.them){
+      const c=state.competition;
+      set(`
+        <div class="lb-hero"><div class="lb-emoji">📨</div><h3>Waiting for your friend</h3>
+          <p>Share your code — the race starts the moment they join.</p></div>
+        <div class="lb-code">${esc(data.invite||c.code)}</div>
+        <button class="btn btn-primary btn-block" id="lb-share">Share code</button>
+        <button class="btn btn-block" id="lb-refresh" style="margin-top:12px">Check again</button>
+        <button class="lb-leave" id="lb-cancel">Cancel competition</button>
+      `);
+      body.querySelector('#lb-share').onclick=async()=>{
+        const txt=`Join my NomNom competition — code ${data.invite||c.code}`;
+        if(navigator.share){ try{ await navigator.share({text:txt}); }catch(e){} }
+        else{ try{ await navigator.clipboard.writeText(data.invite||c.code); toastComp('Code copied'); }catch(e){} }
+      };
+      body.querySelector('#lb-refresh').onclick=viewBoard;
+      body.querySelector('#lb-cancel').onclick=async()=>{ await compLeave(); viewStart(); };
+      return;
+    }
+
+    const me=data.me, them=data.them;
+    const meLead=me.week>them.week, themLead=them.week>me.week;
+    const wk=compWeekTotalLocal();
+    const seasonRow=(u)=>{
+      const pct=u.pct;
+      const badges=compMilestones(pct);
+      return `<div class="sr">
+        <div class="srh"><span>${esc(u.name)}</span><b>${pct!=null?Math.round(pct)+'%':'—'}</b></div>
+        <div class="lb-bar"><span style="width:${pct!=null?Math.max(2,Math.min(100,pct)):0}%"></span></div>
+        ${badges.length?`<div class="lb-badges">🏅 ${badges.map(b=>b+'%').join(' · ')} reached</div>`:''}
+      </div>`;
+    };
+
+    set(`
+      <div class="lb-sec">This week · resets Monday</div>
+      <div class="lb-vs">
+        <div class="col ${meLead?'lead':''}">
+          <div class="who">${esc(me.name)}</div>
+          <div class="pts">${me.week}</div>
+          <div class="plab">points</div>
+        </div>
+        <div class="mid">vs</div>
+        <div class="col ${themLead?'lead':''}">
+          <div class="who">${esc(them.name)}</div>
+          <div class="pts">${them.week}</div>
+          <div class="plab">points</div>
+        </div>
+      </div>
+      <div class="lb-note" style="margin-top:2px">
+        ${meLead?`You're ahead by ${me.week-them.week}.`:themLead?`${esc(them.name)} leads by ${them.week-me.week}.`:`Dead even — ${me.week} apiece.`}
+        You've logged ${wk.loggedCount}/${wk.elapsed} day${wk.elapsed===1?'':'s'} so far.
+      </div>
+
+      <div class="lb-sec">Season · progress to goal</div>
+      <div class="lb-season">
+        ${seasonRow(me)}
+        ${seasonRow(them)}
+      </div>
+
+      <button class="btn btn-block" id="lb-refresh" style="margin-top:16px">Refresh</button>
+      <button class="lb-leave" id="lb-leave">Leave competition</button>
+    `);
+    body.querySelector('#lb-refresh').onclick=viewBoard;
+    body.querySelector('#lb-leave').onclick=async()=>{
+      if(confirm('Leave this competition? Your scores will stop syncing.')){ await compLeave(); viewStart(); }
+    };
+  }
+
+  // route to the right view
+  if(!state.competition) viewStart();
+  else viewBoard();
+}
+
+function toastComp(msg){
+  const t=el(`<div style="position:fixed;left:50%;bottom:90px;transform:translateX(-50%);z-index:200;
+    background:var(--text);color:#fff;padding:11px 18px;border-radius:999px;font-size:14px;
+    font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.2);max-width:80%;text-align:center">${esc(msg)}</div>`);
+  document.body.appendChild(t);
+  setTimeout(()=>{t.style.transition='opacity .3s';t.style.opacity='0';setTimeout(()=>t.remove(),300);},1900);
 }
 
 /* ---------- cloud sync (Supabase) ---------- */
