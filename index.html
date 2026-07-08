@@ -704,6 +704,12 @@
   .rv-leave{width:100%;margin-top:16px;padding:14px 0;border:none;border-radius:16px;background:var(--surface);
     box-shadow:0 3px 14px rgba(43,42,38,.05);font-family:var(--display);font-weight:700;color:#E5533A;cursor:pointer;}
   .rv-brow-s{font-size:12.5px;color:var(--text-soft);line-height:1.45;}
+  .rv-grow{margin-bottom:14px;}
+  .rv-grow:last-child{margin-bottom:2px;}
+  .rv-grow-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;font-size:13.5px;color:var(--text);}
+  .rv-grow-h b{font-family:var(--display);font-size:14px;}
+  .rv-gbar{height:12px;border-radius:999px;background:#EFE9DF;overflow:hidden;}
+  .rv-gbar>span{display:block;height:100%;border-radius:999px;transition:width .4s;}
   .rv-rules{padding:2px 0 4px;}
   .rv-rules-lead{font-size:14px;color:var(--text);line-height:1.55;margin:0 0 18px;}
   .rv-rule{display:flex;gap:12px;align-items:flex-start;margin-bottom:16px;}
@@ -3675,14 +3681,12 @@ function earliestWeightKg(){
   const w=[...state.weights].sort((a,b)=>a.date<b.date?-1:1)[0];
   return unitToKg(w.weight, w.unit||'kg');
 }
-function compSeasonPct(){
-  const c=state.competition; if(!c)return null;
-  // start weight was snapshotted at join; if it was missing then (no weigh-in yet),
-  // fall back to the earliest weigh-in on record and backfill so it locks in.
-  let start=c.startWeightKg;
-  if(start==null){ start=earliestWeightKg(); if(start!=null){ c.startWeightKg=start; save(); } }
-  const goal=state.profile.goalWeight, cur=latestWeightKg();
-  if(start==null||goal==null||cur==null||start===goal)return null;
+// Progress to goal weight: how far your latest weigh-in has moved from your
+// true starting weight (first weigh-in) toward your goal. 0..100%.
+// Display-only — it does not feed the points race.
+function compProgressPct(){
+  const goal=state.profile.goalWeight, start=earliestWeightKg(), cur=latestWeightKg();
+  if(goal==null||start==null||cur==null||start===goal)return null;
   const p=(start-cur)/(start-goal)*100;
   if(!isFinite(p))return null;
   return Math.max(0,Math.min(100,p));
@@ -3745,7 +3749,7 @@ async function compJoin(code){
 }
 async function compPushMine(){
   const c=state.competition; if(!c||!CLOUD||!user)return;
-  const days=comp28Days(), tk=todayKey(), pct=compSeasonPct(), now=new Date().toISOString();
+  const days=comp28Days(), tk=todayKey(), pct=compProgressPct(), now=new Date().toISOString();
   const rows=days.filter(d=>d<=tk).map(d=>({
     competition_id:c.id, user_id:user.id, date:d,
     daily_points:Math.round(compDailyScore(d)), logged:compDayLogged(d),
@@ -3809,8 +3813,10 @@ let rivalsMode='week';      // 'week' | 'month'
 let rivalsView='intro';     // 'intro' | 'join' (only when no competition)
 let rivalsData=null;
 let _rivalsStale=true, _rivalsLoading=false;
+let _rvTimer=null, _rvSig='';
 
 function renderRivals(){
+  rivalsInitDelegation();
   const main=$('main');
   if(!(CLOUD&&user)){
     main.innerHTML=`<div class="rv-empty"><div class="rv-emoji">🔒</div><h3>Sign in to compete</h3><p>Rivals needs an account so you and your friend can share a scoreboard.</p></div>`;
@@ -3820,6 +3826,7 @@ function renderRivals(){
     rivalsView==='join' ? rvRenderJoin() : rvRenderIntro();
     return;
   }
+  rivalsStartAuto();
   if(_rivalsStale && !_rivalsLoading) rivalsLoad();
   if(rivalsData && rivalsData.error){ rvRenderError(rivalsData.error); return; }
   if(!rivalsData){ main.innerHTML=rvHeader('Rivals','Loading…')+`<div class="rv-empty"><div class="rv-spin"></div></div>`; return; }
@@ -3829,12 +3836,37 @@ function renderRivals(){
 
 async function rivalsLoad(){
   _rivalsLoading=true; _rivalsStale=false;
-  try{ await compPushMine(); rivalsData=await compFetchAll(); }
+  try{ await compPushMine(); rivalsData=await compFetchAll(); _rvSig=rvDataSig(rivalsData); }
   catch(e){ rivalsData={error:(e&&e.message)||'Could not load the scoreboard.'}; }
   _rivalsLoading=false;
   if(tab==='rivals') renderRivals();
 }
 function rivalsRefresh(){ _rivalsStale=true; renderRivals(); }
+
+/* ---- auto-refresh (silent polling while on the tab) ---- */
+function rvUserSig(u){ return u?[u.pct,Object.keys(u.byDate).sort().map(d=>d+':'+u.byDate[d].points+(u.byDate[d].logged?'1':'0')).join(',')].join('|'):'∅'; }
+function rvDataSig(d){ return d?[d.status,d.startedAt,rvUserSig(d.me),rvUserSig(d.them)].join('~'):''; }
+function rivalsStartAuto(){
+  if(_rvTimer)return;
+  _rvTimer=setInterval(()=>{
+    if(tab!=='rivals'||!state.competition){ clearInterval(_rvTimer); _rvTimer=null; return; }
+    if(document.hidden)return;
+    if(_navStack.length)return;                         // a modal is open — don't disrupt
+    if(document.getElementById('rv-menu-pop'))return;   // menu open
+    rivalsSilentRefresh();
+  }, 20000);
+}
+async function rivalsSilentRefresh(){
+  if(!(CLOUD&&user)||!state.competition||_rivalsLoading)return;
+  try{
+    await compPushMine();
+    const d=await compFetchAll();
+    const sig=rvDataSig(d);
+    rivalsData=d;
+    if(tab==='rivals' && sig!==_rvSig && !_navStack.length && !document.getElementById('rv-menu-pop')){ _rvSig=sig; renderRivals(); }
+    else _rvSig=sig;
+  }catch(e){/* silent */}
+}
 
 /* ---- shared bits ---- */
 const RV_PEOPLE='<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 6.5a3 3 0 0 1 0 6M17 20a5.5 5.5 0 0 0-2.5-4.6"/></svg>';
@@ -3848,9 +3880,19 @@ function rvHeader(title,sub,menu){
     </div>
   </div>`;
 }
-function rvWireHeader(){
-  const rb=$('rv-rules'); if(rb)rb.onclick=openRivalsRules;
-  rvWireMenu();
+function rvWireHeader(){ /* header buttons handled by delegation (rivalsInitDelegation) */ }
+function rivalsInitDelegation(){
+  if(window._rvDeleg)return; window._rvDeleg=true;
+  document.addEventListener('click',(e)=>{
+    if(tab!=='rivals')return;
+    const t=e.target;
+    if(t.closest&&t.closest('#rv-rules')){ e.preventDefault(); openRivalsRules(); return; }
+    const mb=t.closest&&t.closest('#rv-menu');
+    if(mb){ e.preventDefault(); rvToggleMenu(mb); return; }
+  });
+  document.addEventListener('visibilitychange',()=>{
+    if(!document.hidden && tab==='rivals' && state.competition){ rivalsSilentRefresh(); }
+  });
 }
 function openRivalsRules(){
   const T=state.settings.dailyTarget;
@@ -3872,8 +3914,8 @@ function openRivalsRules(){
 
       <div class="rv-rule">
         <div class="rv-rule-ic" style="background:#FDECE8;color:${RV_THEM}">△</div>
-        <div><div class="rv-rule-t">Weight-goal progress</div>
-        <div class="rv-rule-s">Tracked separately as % of the way from your starting weight to your goal. It's a parallel race — it doesn't add to your daily points.</div></div>
+        <div><div class="rv-rule-t">Progress to goal weight</div>
+        <div class="rv-rule-s">Shown separately as how close your latest weigh-in is to your goal, measured from your starting weight. It's a parallel race — it doesn't add to your daily points.</div></div>
       </div>
 
       <div class="rv-rule">
@@ -3911,7 +3953,6 @@ function rvRenderIntro(){
     catch(e){ cr.disabled=false; cr.textContent='Start a competition'; toastComp((e&&e.message)||'Could not create.'); }
   };
   $('rv-joinbtn').onclick=()=>{ rivalsView='join'; renderRivals(); };
-  const rb=$('rv-rules'); if(rb)rb.onclick=openRivalsRules;
 }
 
 /* ---- join form (fixed NOM- prefix, only 4 chars typed) ---- */
@@ -3945,7 +3986,6 @@ function rvRenderJoin(){
   $('rv-do').onclick=go;
   inp.onkeydown=(e)=>{ if(e.key==='Enter')go(); };
   $('rv-back').onclick=()=>{ rivalsView='intro'; renderRivals(); };
-  const rb=$('rv-rules'); if(rb)rb.onclick=openRivalsRules;
 }
 
 /* ---- pending (waiting for the friend to join) ---- */
@@ -3983,23 +4023,20 @@ async function rvShare(code){
 }
 
 /* ---- menu (top-right people icon → refresh / leave) ---- */
-function rvWireMenu(){
-  const b=$('rv-menu'); if(!b)return;
-  b.onclick=()=>{
-    const existing=document.getElementById('rv-menu-pop'); if(existing){existing.remove();return;}
-    const pop=el(`<div id="rv-menu-pop" class="rv-pop">
-      <button data-act="refresh">Refresh</button>
-      <button data-act="leave" class="danger">Leave competition</button>
-    </div>`);
-    const anchor=b.closest('.rv-topbar')||b.parentElement;
-    anchor.appendChild(pop);
-    pop.querySelector('[data-act="refresh"]').onclick=()=>{ pop.remove(); rivalsRefresh(); };
-    pop.querySelector('[data-act="leave"]').onclick=async()=>{
-      pop.remove();
-      if(confirm('Leave this competition? Your scores will stop syncing.')){ await compLeave(); rivalsData=null; renderRivals(); }
-    };
-    setTimeout(()=>{ document.addEventListener('click',function h(ev){ if(!pop.contains(ev.target)&&ev.target!==b){pop.remove();document.removeEventListener('click',h);} }); },0);
+function rvToggleMenu(b){
+  const existing=document.getElementById('rv-menu-pop'); if(existing){existing.remove();return;}
+  const pop=el(`<div id="rv-menu-pop" class="rv-pop">
+    <button data-act="refresh">Refresh now</button>
+    <button data-act="leave" class="danger">Leave competition</button>
+  </div>`);
+  const anchor=b.closest('.rv-topbar')||b.parentElement;
+  anchor.appendChild(pop);
+  pop.querySelector('[data-act="refresh"]').onclick=()=>{ pop.remove(); rivalsRefresh(); };
+  pop.querySelector('[data-act="leave"]').onclick=async()=>{
+    pop.remove();
+    if(confirm('Leave this competition? Your scores will stop syncing.')){ await compLeave(); rivalsData=null; renderRivals(); }
   };
+  setTimeout(()=>{ document.addEventListener('click',function h(ev){ if(!pop.contains(ev.target)&&!(ev.target.closest&&ev.target.closest('#rv-menu'))){pop.remove();document.removeEventListener('click',h);} }); },0);
 }
 
 /* ---- the scoreboard ---- */
@@ -4023,24 +4060,20 @@ function rvBreakRow(label,my,their,suffix,myLead){
     </div>
   </div>`;
 }
-function rvWeightRow(mePct,themPct){
-  if(mePct==null && themPct==null){
-    return `<div class="rv-brow">
-      <div class="rv-brow-h"><span>Weight-goal progress</span></div>
-      <div class="rv-brow-s">Log your weight and set a goal in the Weight tab to track this.</div>
-    </div>`;
-  }
-  const mv=mePct==null?'—':mePct+'%', tv=themPct==null?'—':themPct+'%';
-  const ma=mePct==null?0:mePct, ta=themPct==null?0:themPct;
-  const lead=ma>=ta;
-  const you=`<b style="color:${RV_YOU}">${mv}</b>`, them=`<b style="color:${RV_THEM}">${tv}</b>`;
-  return `<div class="rv-brow">
-    <div class="rv-brow-h"><span>Weight-goal progress</span>
-      <span class="rv-brow-v">${lead?you:mv} vs ${lead?tv:them}</span></div>
-    <div class="rv-dual">
-      <div class="rv-dbar" style="flex:${Math.max(ma,0.001)};background:${ma>=ta?RV_YOU:RV_YOU_LT}"></div>
-      <div class="rv-dbar" style="flex:${Math.max(ta,0.001)};background:${ta>ma?RV_THEM:RV_THEM_LT}"></div>
-    </div>
+function rvGoalRow(name,pct,color){
+  const p=pct==null?null:Math.round(pct);
+  return `<div class="rv-grow">
+    <div class="rv-grow-h"><span>${esc(name)}</span><b style="color:${color}">${p==null?'—':p+'%'}</b></div>
+    <div class="rv-gbar"><span style="width:${p==null?0:Math.max(2,Math.min(100,p))}%;background:${color}"></span></div>
+  </div>`;
+}
+function rvGoalCard(mePct,themPct,themName){
+  const body = (mePct==null && themPct==null)
+    ? `<div class="rv-brow-s">Log your weight and set a goal in the Weight tab to track this.</div>`
+    : rvGoalRow('You',mePct,RV_YOU)+rvGoalRow(themName,themPct,RV_THEM);
+  return `<div class="rv-card">
+    <div class="rv-card-h">Progress to goal weight</div>
+    ${body}
   </div>`;
 }
 
@@ -4082,13 +4115,15 @@ function rvRenderBoard(){
     <div class="rv-hero-foot">${leadTxt} — ${leftTxt}</div>
   </div>`;
 
-  // breakdown
+  // breakdown (adherence points only)
   const breakdown=`<div class="rv-card">
     <div class="rv-card-h">Where the points came from</div>
     ${rvBreakRow('Logging streak',A.logging,B.logging,'',A.logging>=B.logging)}
     ${rvBreakRow('Days under calorie goal',Math.round(A.calorie),Math.round(B.calorie),'',A.calorie>=B.calorie)}
-    ${rvWeightRow(mePct,themPct)}
   </div>`;
+
+  // progress to goal weight — its own widget (closeness to goal; not scored)
+  const goalCard=rvGoalCard(mePct,themPct,themName);
 
   // day-by-day (week) or week-by-week (month)
   let chart='';
@@ -4155,12 +4190,9 @@ function rvRenderBoard(){
 
   $('main').innerHTML =
     rvHeader('Rivals', `You & ${themName}`, true) +
-    toggle + hero + breakdown + chart +
-    `<button class="btn btn-block" id="rv-refresh" style="margin-top:4px">Refresh</button>`;
+    toggle + hero + breakdown + goalCard + chart;
 
-  rvWireHeader();
   document.querySelectorAll('.rv-toggle button').forEach(bt=>bt.onclick=()=>{ rivalsMode=bt.dataset.m; rvRenderBoard(); });
-  const rf=$('rv-refresh'); if(rf)rf.onclick=rivalsRefresh;
 }
 
 /* ---- toast ---- */
