@@ -653,8 +653,8 @@
   .rv-toggle button{flex:1;text-align:center;padding:8px 0;border:none;background:none;border-radius:9px;
     font-family:var(--display);font-weight:600;font-size:13px;color:var(--text-soft);cursor:pointer;}
   .rv-toggle button.on{background:#fff;color:var(--text);font-weight:700;box-shadow:0 1px 3px rgba(43,42,38,.08);}
-  .rv-hero{background:linear-gradient(155deg,#5A92DD,#3A63AE);border-radius:26px;padding:20px 18px 18px;
-    box-shadow:0 8px 22px -8px rgba(74,130,214,.5);margin-bottom:14px;}
+  .rv-hero{background:linear-gradient(155deg,var(--header),var(--accent-strong));border-radius:26px;padding:20px 18px 18px;
+    box-shadow:0 8px 22px -8px rgba(0,0,0,.22);margin-bottom:14px;}
   .rv-hero-row{display:flex;align-items:flex-end;justify-content:space-between;}
   .rv-hero-p{text-align:center;width:108px;}
   .rv-av{width:58px;height:58px;margin:0 auto;border-radius:50%;border:3px solid #fff;display:flex;
@@ -4115,14 +4115,14 @@ function rvRenderBoard(){
   const hero=`<div class="rv-hero">
     <div class="rv-hero-row">
       <div class="rv-hero-p">
-        ${rvAvatar(rvInitial(meName),RV_YOU,'#F5EFE6','#fff')}
+        ${rvAvatar(rvInitial(meName),RV_YOU,RV_YOU_BG,'#fff')}
         <div class="rv-hero-name">You</div>
         <div class="rv-hero-pts">${A.points.toLocaleString()}</div>
         <div class="rv-hero-lbl">points</div>
       </div>
       <div class="rv-hero-vs">VS</div>
       <div class="rv-hero-p" style="opacity:.94">
-        ${rvAvatar(rvInitial(themName),RV_THEM,'#FFE1D8','rgba(255,255,255,.5)')}
+        ${rvAvatar(rvInitial(themName),RV_THEM,RV_THEM_BG,'rgba(255,255,255,.5)')}
         <div class="rv-hero-name">${esc(themName)}</div>
         <div class="rv-hero-pts" style="color:rgba(255,255,255,.9)">${B.points.toLocaleString()}</div>
         <div class="rv-hero-lbl">points</div>
