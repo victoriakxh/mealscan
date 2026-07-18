@@ -1557,22 +1557,26 @@ function openAdd(){
       const low=term.toLowerCase(), isBC=/^\d{8,14}$/.test(term);
       const seq=++_searchSeq;                       // invalidate any in-flight online lookups
       clearTimeout(_offT); clearTimeout(_aiT);
-      let html='';
-      if(isBC) html+=`<div class="add-label">Barcode</div>`+rowHtml('Look up barcode '+term,'Search packaged products','data-bc="1"',IC_BARCODE);
+      const sections=[];
+      if(isBC) sections.push(`<div class="add-label">Barcode</div>`+rowHtml('Look up barcode '+term,'Search packaged products','data-bc="1"',IC_BARCODE));
       const hpbM=(SGDB||[]).filter(f=>f[0].toLowerCase().includes(low)).slice(0,20);
-      if(hpbM.length) html+=`<div class="add-label">Singapore (HPB)</div>`+hpbM.map((f,i)=>{const g=(+f[6]>0)?+f[6]:null; const sub=g?`${r0(f[1]*g/100)} kcal · ${esc(f[8]||(g+' g'))}`:`${r0(f[1])} kcal/100g`; return rowHtml(f[0],sub,`data-hpb="${i}"`);}).join('');
+      if(hpbM.length) sections.push(`<div class="add-label">Singapore (HPB)</div>`+hpbM.map((f,i)=>{const g=(+f[6]>0)?+f[6]:null; const sub=g?`${r0(f[1]*g/100)} kcal · ${esc(f[8]||(g+' g'))}`:`${r0(f[1])} kcal/100g`; return rowHtml(f[0],sub,`data-hpb="${i}"`);}).join(''));
       const libM=state.library.filter(l=>l.name.toLowerCase().includes(low)).slice(0,8);
-      if(libM.length) html+=`<div class="add-label">Saved</div>`+libM.map(l=>{const sub=l.perServing?`${r0(l.perServing.calories)} kcal per ${esc(l.perServing.portion)}`:`${r0(l.per_100g.calories)} kcal/100g`;return rowHtml(l.name,sub,`data-lib="${l.id}"`);}).join('');
+      if(libM.length) sections.push(`<div class="add-label">Saved</div>`+libM.map(l=>{const sub=l.perServing?`${r0(l.perServing.calories)} kcal per ${esc(l.perServing.portion)}`:`${r0(l.per_100g.calories)} kcal/100g`;return rowHtml(l.name,sub,`data-lib="${l.id}"`);}).join(''));
       const dbM=(DB||[]).filter(f=>f.name.toLowerCase().includes(low) && !HPB_NAMES.has(_norm(f.name))).slice(0,12);
-      if(dbM.length) html+=`<div class="add-label">Local database</div>`+dbM.map((f,i)=>rowHtml(f.name,`${r0(f.calories)} kcal · ${esc(f.portion)}`,`data-db="${i}"`)).join('');
+      if(dbM.length) sections.push(`<div class="add-label">Local database</div>`+dbM.map((f,i)=>rowHtml(f.name,`${r0(f.calories)} kcal · ${esc(f.portion)}`,`data-db="${i}"`)).join(''));
       let onM=[];
       if(low.length>=2){
-        if(ONDB){ onM=ONDB.filter(a=>a[0].toLowerCase().includes(low)).slice(0,25); if(onM.length) html+=`<div class="add-label">OpenNutrition</div>`+onM.map((f,i)=>rowHtml(f[0],`${r0(f[1])} kcal/100g`,`data-on="${i}"`)).join(''); }
-        else html+=`<div class="add-label">OpenNutrition</div><div class="empty" style="border:none" id="af-onload">Loading food database (first time, ~10 MB)…</div>`;
+        if(ONDB){ onM=ONDB.filter(a=>a[0].toLowerCase().includes(low)).slice(0,25); if(onM.length) sections.push(`<div class="add-label">OpenNutrition</div>`+onM.map((f,i)=>rowHtml(f[0],`${r0(f[1])} kcal/100g`,`data-on="${i}"`)).join('')); }
+        else sections.push(`<div class="add-label">OpenNutrition</div><div class="empty" style="border:none" id="af-onload">Loading food database (first time, ~10 MB)…</div>`);
       }
+      // AI search sits right after the first results section (2nd choice), not buried at the bottom
+      const aiSecHtml=(!isBC && low.length>=1) ? `<div id="af-aisec"></div>` : '';
+      let html=sections.length?sections[0]:'';
+      if(aiSecHtml) html+=aiSecHtml;
+      if(sections.length>1) html+=sections.slice(1).join('');
       // online avenues fill in here after a short debounce — no buttons
       if(!isBC && low.length>=2) html+=`<div id="af-offsec"></div>`;
-      if(!isBC && low.length>=1) html+=`<div id="af-aisec"></div>`;
       if(!html) html=`<div class="empty" style="border:none">Type a food name to search or estimate with AI.</div>`;
       main.innerHTML=html;
 
@@ -1630,7 +1634,7 @@ function openAdd(){
         + (ONDB?ONDB.filter(a=>a[0].toLowerCase().includes(low)).length:0);
       // plenty of results already, or no key -> offer AI as a single one-tap row (don't spend a call)
       if(localCount>=3 || !state.settings.apiKey){
-        sec.innerHTML=`<div class="add-label">Not what you want?</div>`+rowHtml(`Estimate “${term}” with AI`,'AI nutrition estimate','data-aigo="1"',IC_SPARK);
+        sec.innerHTML=`<div class="add-label">AI search</div>`+rowHtml(`Estimate “${term}” with AI`,'AI nutrition estimate','data-aigo="1"',IC_SPARK);
         const g=sec.querySelector('[data-aigo]'); if(g)g.onclick=()=>aiEstimate(term);
         return;
       }
